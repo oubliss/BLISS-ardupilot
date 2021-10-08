@@ -26,6 +26,7 @@ import textwrap
 import time
 import shlex
 import binascii
+import math
 
 from pymavlink import mavextra
 from pysim import vehicleinfo
@@ -323,6 +324,15 @@ def do_build(opts, frame_options):
     if opts.disable_ekf3:
         cmd_configure.append("--disable-ekf3")
 
+    if opts.postype_single:
+        cmd_configure.append("--postype-single")
+
+    if opts.ekf_double:
+        cmd_configure.append("--ekf-double")
+
+    if opts.ekf_single:
+        cmd_configure.append("--ekf-single")
+
     pieces = [shlex.split(x) for x in opts.waf_configure_args]
     for piece in pieces:
         cmd_configure.extend(piece)
@@ -414,6 +424,35 @@ def find_offsets(instances, file_path):
     return offsets
 
 
+def find_geocoder_location(locname):
+    '''find a location using geocoder and SRTM'''
+    try:
+        import geocoder
+    except ImportError:
+        print("geocoder not installed")
+        return None
+    j = geocoder.osm(locname)
+    if j is None or not hasattr(j, 'lat') or j.lat is None:
+        print("geocoder failed to find '%s'" % locname)
+        return None
+    lat = j.lat
+    lon = j.lng
+    from MAVProxy.modules.mavproxy_map import srtm
+    downloader = srtm.SRTMDownloader()
+    downloader.loadFileList()
+    start = time.time()
+    alt = None
+    while time.time() - start < 5:
+        tile = downloader.getTile(int(math.floor(lat)), int(math.floor(lon)))
+        if tile:
+            alt = tile.getAltitudeFromLatLon(lat, lon)
+            break
+    if alt is None:
+        print("timed out getting altitude for '%s'" % locname)
+        return None
+    return [lat, lon, alt, 0.0]
+
+
 def find_location_by_name(locname):
     """Search locations.txt for locname, return GPS coords"""
     locations_userpath = os.environ.get('ARDUPILOT_LOCATIONS',
@@ -433,8 +472,11 @@ def find_location_by_name(locname):
                 if name == locname:
                     return [(float)(x) for x in loc.split(",")]
 
-    print("Failed to find location (%s)" % cmd_opts.location)
-    sys.exit(1)
+    # fallback to geocoder if available
+    loc = find_geocoder_location(locname)
+    if loc is None:
+        sys.exit(1)
+    return loc
 
 
 def find_spawns(loc, offsets):
@@ -767,9 +809,7 @@ def start_mavproxy(opts, stuff):
                 else:
                     c.extend(["--out", "127.0.0.1:" + str(port)])
 
-        if opts.hil:
-            c.extend(["--load-module", "HIL"])
-        else:
+        if True:
             if opts.mcast:
                 c.extend(["--master", "mcast:"])
             else:
@@ -832,10 +872,6 @@ parser.add_option("-C", "--sim_vehicle_sh_compatible",
                   default=False,
                   help="be compatible with the way sim_vehicle.sh works; "
                   "make this the first option")
-parser.add_option("-H", "--hil",
-                  action='store_true',
-                  default=False,
-                  help="start HIL")
 
 group_build = optparse.OptionGroup(parser, "Build options")
 group_build.add_option("-N", "--no-rebuild",
@@ -1055,6 +1091,15 @@ group_sim.add_option("", "--sysid",
                      type='int',
                      default=None,
                      help="Set SYSID_THISMAV")
+group_sim.add_option("--postype-single",
+                     action='store_true',
+                     help="force single precision postype_t")
+group_sim.add_option("--ekf-double",
+                     action='store_true',
+                     help="use double precision in EKF")
+group_sim.add_option("--ekf-single",
+                     action='store_true',
+                     help="use single precision in EKF")
 parser.add_option_group(group_sim)
 
 
@@ -1118,20 +1163,6 @@ if cmd_opts.sim_vehicle_sh_compatible and cmd_opts.jobs is None:
     cmd_opts.jobs = 1
 
 # validate parameters
-if cmd_opts.hil:
-    if cmd_opts.valgrind:
-        print("May not use valgrind with hil")
-        sys.exit(1)
-    if cmd_opts.callgrind:
-        print("May not use callgrind with hil")
-        sys.exit(1)
-    if cmd_opts.gdb or cmd_opts.gdb_stopped or cmd_opts.lldb or cmd_opts.lldb_stopped:
-        print("May not use gdb or lldb with hil")
-        sys.exit(1)
-    if cmd_opts.strace:
-        print("May not use strace with hil")
-        sys.exit(1)
-
 if cmd_opts.valgrind and (cmd_opts.gdb or cmd_opts.gdb_stopped or cmd_opts.lldb or cmd_opts.lldb_stopped):
     print("May not use valgrind with gdb or lldb")
     sys.exit(1)
@@ -1226,9 +1257,8 @@ if cmd_opts.instances is not None:
 else:
     instances = range(cmd_opts.instance, cmd_opts.instance + cmd_opts.count)
 
-if not cmd_opts.hil:
-    if cmd_opts.instance == 0:
-        kill_tasks()
+if cmd_opts.instance == 0:
+    kill_tasks()
 
 if cmd_opts.tracker:
     start_antenna_tracker(cmd_opts)
@@ -1275,20 +1305,7 @@ else:
         finally:
             instance_dir.append(i_dir)
 
-if cmd_opts.hil:
-    # (unlikely)
-    jsbsim_opts = [
-        os.path.join(autotest_dir,
-                     "jsb_sim/runsim.py"),
-        "--speedup=" + str(cmd_opts.speedup)
-    ]
-    for i in instances:
-        c = []
-        if spawns is not None:
-            c = ["--home", spawns[i]]
-        run_in_terminal_window("JSBSim", jsbsim_opts + c)
-
-else:
+if True:
     if not cmd_opts.no_rebuild:  # i.e. we should rebuild
         do_build(cmd_opts, frame_infos)
 

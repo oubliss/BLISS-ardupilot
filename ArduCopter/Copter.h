@@ -28,46 +28,46 @@
 #include <AP_HAL/AP_HAL.h>
 
 // Common dependencies
-#include <AP_Common/AP_Common.h>
-#include <AP_Common/Location.h>
-#include <AP_Param/AP_Param.h>
-#include <StorageManager/StorageManager.h>
+#include <AP_Common/AP_Common.h>            // Common definitions and utility routines for the ArduPilot libraries
+#include <AP_Common/Location.h>             // Library having the implementation of location class         
+#include <AP_Param/AP_Param.h>              // A system for managing and storing variables that are of general interest to the system.
+#include <StorageManager/StorageManager.h>  // library for Management for hal.storage to allow for backwards compatible mapping of storage offsets to available storage
 
 // Application dependencies
-#include <GCS_MAVLink/GCS.h>
-#include <AP_Logger/AP_Logger.h>          // ArduPilot Mega Flash Memory Library
-#include <AP_Math/AP_Math.h>            // ArduPilot Mega Vector/Matrix math Library
-#include <AP_AccelCal/AP_AccelCal.h>                // interface and maths for accelerometer calibration
-#include <AP_InertialSensor/AP_InertialSensor.h>  // ArduPilot Mega Inertial Sensor (accel & gyro) Library
-#include <AP_AHRS/AP_AHRS.h>
-#include <AP_Mission/AP_Mission.h>     // Mission command library
-#include <AC_AttitudeControl/AC_AttitudeControl_Multi.h> // Attitude control library
-#include <AC_AttitudeControl/AC_AttitudeControl_Multi_6DoF.h> // 6DoF Attitude control library
-#include <AC_AttitudeControl/AC_AttitudeControl_Heli.h> // Attitude control library for traditional helicopter
-#include <AC_AttitudeControl/AC_PosControl.h>      // Position control library
-#include <AP_Motors/AP_Motors.h>          // AP Motors library
-#include <AP_Stats/AP_Stats.h>     // statistics library
-#include <Filter/Filter.h>             // Filter library
+#include <GCS_MAVLink/GCS.h>                // Library for Interface definition for the various Ground Control System
+#include <AP_Logger/AP_Logger.h>            // ArduPilot Mega Flash Memory Library
+#include <AP_Math/AP_Math.h>                // ArduPilot Mega Vector/Matrix math Library
+#include <AP_AccelCal/AP_AccelCal.h>        // interface and maths for accelerometer calibration
+#include <AP_InertialSensor/AP_InertialSensor.h>                // ArduPilot Mega Inertial Sensor (accel & gyro) Library
+#include <AP_AHRS/AP_AHRS.h>                                    // AHRS (Attitude Heading Reference System) interface library for ArduPilot
+#include <AP_Mission/AP_Mission.h>                              // Mission command library
+#include <AC_AttitudeControl/AC_AttitudeControl_Multi.h>        // Attitude control library
+#include <AC_AttitudeControl/AC_AttitudeControl_Multi_6DoF.h>   // 6DoF Attitude control library
+#include <AC_AttitudeControl/AC_AttitudeControl_Heli.h>         // Attitude control library for traditional helicopter
+#include <AC_AttitudeControl/AC_PosControl.h>                   // Position control library
+#include <AP_Motors/AP_Motors.h>            // AP Motors library
+#include <AP_Stats/AP_Stats.h>              // statistics library
+#include <Filter/Filter.h>                  // Filter library
 #include <AP_Airspeed/AP_Airspeed.h>        // needed for AHRS build
-#include <AP_Vehicle/AP_Vehicle.h>         // needed for AHRS build
-#include <AP_InertialNav/AP_InertialNav.h>     // ArduPilot Mega inertial navigation library
-#include <AC_WPNav/AC_WPNav.h>           // ArduCopter waypoint navigation library
-#include <AC_WPNav/AC_Loiter.h>
-#include <AC_WPNav/AC_Circle.h>          // circle navigation library
-#include <AP_Declination/AP_Declination.h>     // ArduPilot Mega Declination Helper Library
+#include <AP_Vehicle/AP_Vehicle.h>          // needed for AHRS build
+#include <AP_InertialNav/AP_InertialNav.h>  // ArduPilot Mega inertial navigation library
+#include <AC_WPNav/AC_WPNav.h>              // ArduCopter waypoint navigation library
+#include <AC_WPNav/AC_Loiter.h>             // ArduCopter Loiter Mode Library
+#include <AC_WPNav/AC_Circle.h>             // circle navigation library
+#include <AP_Declination/AP_Declination.h>  // ArduPilot Mega Declination Helper Library
 #include <AP_RCMapper/AP_RCMapper.h>        // RC input mapping library
-#include <AP_BattMonitor/AP_BattMonitor.h>     // Battery monitor library
-#include <AP_LandingGear/AP_LandingGear.h>     // Landing Gear library
+#include <AP_BattMonitor/AP_BattMonitor.h>  // Battery monitor library
+#include <AP_LandingGear/AP_LandingGear.h>  // Landing Gear library
 #include <AC_InputManager/AC_InputManager.h>        // Pilot input handling library
 #include <AC_InputManager/AC_InputManager_Heli.h>   // Heli specific pilot input handling library
-#include <AP_Arming/AP_Arming.h>
-#include <AP_SmartRTL/AP_SmartRTL.h>
-#include <AP_TempCalibration/AP_TempCalibration.h>
-#include <AC_AutoTune/AC_AutoTune.h>
-#include <AP_Parachute/AP_Parachute.h>
-#include <AC_Sprayer/AC_Sprayer.h>
-#include <AP_ADSB/AP_ADSB.h>
-#include <AP_Proximity/AP_Proximity.h>
+#include <AP_Arming/AP_Arming.h>            // ArduPilot motor arming library
+#include <AP_SmartRTL/AP_SmartRTL.h>        // ArduPilot Smart Return To Launch Mode (SRTL) library
+#include <AP_TempCalibration/AP_TempCalibration.h>  // temperature calibration library
+#include <AC_AutoTune/AC_AutoTune.h>        // ArduCopter autotune library. support for autotune of multirotors.
+#include <AP_Parachute/AP_Parachute.h>      // ArduPilot parachute release library
+#include <AC_Sprayer/AC_Sprayer.h>          // Crop sprayer library
+#include <AP_ADSB/AP_ADSB.h>                // ADS-B RF based collision avoidance module library
+#include <AP_Proximity/AP_Proximity.h>      // ArduPilot proximity sensor library
 
 // CASS libraries declaration
 #include <AC_CASS_IMET/AC_CASS_Imet.h>
@@ -275,8 +275,9 @@ private:
 
     class SurfaceTracking {
     public:
-        // get desired climb rate (in cm/s) to achieve surface tracking
-        float adjust_climb_rate(float target_rate);
+        // update_surface_offset - manages the vertical offset of the position controller to follow the
+        //   measured ground or ceiling level measured using the range finder.
+        void update_surface_offset();
 
         // get/set target altitude (in cm) above ground
         bool get_target_alt_cm(float &target_alt_cm) const;
@@ -298,7 +299,6 @@ private:
 
     private:
         Surface surface = Surface::GROUND;
-        float target_dist_cm;       // desired distance in cm from ground or ceiling
         uint32_t last_update_ms;    // system time of last update to target_alt_cm
         uint32_t last_glitch_cleared_ms;    // system time of last handle glitch recovery
         bool valid_for_logging;     // true if target_alt_cm is valid for logging
@@ -651,11 +651,18 @@ private:
                              uint8_t &task_count,
                              uint32_t &log_bit) override;
     void fast_loop() override;
+#ifdef ENABLE_SCRIPTING
     bool start_takeoff(float alt) override;
     bool set_target_location(const Location& target_loc) override;
+    bool set_target_pos_NED(const Vector3f& target_pos, bool use_yaw, float yaw_deg, bool use_yaw_rate, float yaw_rate_degs, bool yaw_relative, bool terrain_alt) override;
     bool set_target_posvel_NED(const Vector3f& target_pos, const Vector3f& target_vel) override;
+    bool set_target_posvelaccel_NED(const Vector3f& target_pos, const Vector3f& target_vel, const Vector3f& target_accel, bool use_yaw, float yaw_deg, bool use_yaw_rate, float yaw_rate_degs, bool yaw_relative) override;
     bool set_target_velocity_NED(const Vector3f& vel_ned) override;
+    bool set_target_velaccel_NED(const Vector3f& target_vel, const Vector3f& target_accel, bool use_yaw, float yaw_deg, bool use_yaw_rate, float yaw_rate_degs, bool relative_yaw) override;
     bool set_target_angle_and_climbrate(float roll_deg, float pitch_deg, float yaw_deg, float climb_rate_ms, bool use_yaw_rate, float yaw_rate_degs) override;
+    bool get_circle_radius(float &radius_m) override;
+    bool set_circle_rate(float rate_dps) override;
+#endif // ENABLE_SCRIPTING
     void rc_loop();
     void throttle_loop();
     void update_batt_compass(void);
@@ -800,7 +807,7 @@ private:
 #if FRAME_CONFIG == HELI_FRAME
     void Log_Write_Heli(void);
 #endif
-    void Log_Write_GuidedTarget(ModeGuided::SubMode submode, const Vector3f& pos_target, const Vector3f& vel_target);
+    void Log_Write_GuidedTarget(ModeGuided::SubMode submode, const Vector3f& pos_target, bool terrain_alt, const Vector3f& vel_target, const Vector3f& accel_target);
     void Log_Write_SysID_Setup(uint8_t systemID_axis, float waveform_magnitude, float frequency_start, float frequency_stop, float time_fade_in, float time_const_freq, float time_record, float time_fade_out);
     void Log_Write_SysID_Data(float waveform_time, float waveform_sample, float waveform_freq, float angle_x, float angle_y, float angle_z, float accel_x, float accel_y, float accel_z);
     void Log_Write_Vehicle_Startup_Messages();
@@ -865,7 +872,6 @@ private:
     bool rangefinder_alt_ok() const;
     bool rangefinder_up_ok() const;
     void rpm_update();
-    void init_optflow();
     void update_optical_flow(void);
     void compass_cal_update(void);
     void accel_cal_update(void);

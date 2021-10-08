@@ -144,13 +144,6 @@ bool GCS_MAVLINK::init(uint8_t instance)
 
     mavlink_comm_port[chan] = _port;
 
-    // create performance counters
-    snprintf(_perf_packet_name, sizeof(_perf_packet_name), "GCS_Packet_%u", chan);
-    _perf_packet = hal.util->perf_alloc(AP_HAL::Util::PC_ELAPSED, _perf_packet_name);
-
-    snprintf(_perf_update_name, sizeof(_perf_update_name), "GCS_Update_%u", chan);
-    _perf_update = hal.util->perf_alloc(AP_HAL::Util::PC_ELAPSED, _perf_update_name);
-
     AP_SerialManager::SerialProtocol mavlink_protocol = serial_manager.get_mavlink_protocol(chan);
     mavlink_status_t *status = mavlink_get_channel_status(chan);
     if (status == nullptr) {
@@ -268,7 +261,7 @@ void GCS_MAVLINK::send_battery_status(const uint8_t instance) const
                                     consumed_wh,  // consumed energy in hJ (hecto-Joules)
                                     battery.capacity_remaining_pct(instance),
                                     0, // time remaining, seconds (not provided)
-                                    MAV_BATTERY_CHARGE_STATE_UNDEFINED,
+                                    battery.get_mavlink_charge_state(instance), // battery charge state
                                     cell_volts_ext); // Cell 11..14 voltages
 }
 
@@ -858,6 +851,7 @@ ap_message GCS_MAVLINK::mavlink_id_to_ap_message_id(const uint32_t mavlink_id) c
         { MAVLINK_MSG_ID_EFI_STATUS,            MSG_EFI_STATUS},
         { MAVLINK_MSG_ID_GENERATOR_STATUS,      MSG_GENERATOR_STATUS},
         { MAVLINK_MSG_ID_WINCH_STATUS,          MSG_WINCH_STATUS},
+        { MAVLINK_MSG_ID_WATER_DEPTH,           MSG_WATER_DEPTH},
             };
 
     for (uint8_t i=0; i<ARRAY_SIZE(map); i++) {
@@ -883,16 +877,6 @@ bool GCS_MAVLINK::should_send_message_in_delay_callback(const ap_message id) con
 {
     // No ID we return true for may take more than a few hundred
     // microseconds to return!
-
-    if (in_hil_mode()) {
-        // in HIL we need to keep sending servo values to ensure
-        // the simulator doesn't pause, otherwise our sensor
-        // calibration could stall
-        if (id == MSG_SERVO_OUT ||
-            id == MSG_SERVO_OUTPUT_RAW) {
-            return true;
-        }
-    }
 
     switch (id) {
     case MSG_HEARTBEAT:
@@ -1417,8 +1401,6 @@ GCS_MAVLINK::update_receive(uint32_t max_time_us)
     uint32_t tstart_us = AP_HAL::micros();
     uint32_t now_ms = AP_HAL::millis();
 
-    hal.util->perf_begin(_perf_update);
-
     status.packet_rx_drop_count = 0;
 
     const uint16_t nbytes = _port->available();
@@ -1453,9 +1435,7 @@ GCS_MAVLINK::update_receive(uint32_t max_time_us)
         // Try to get a new message
         if (mavlink_parse_char(chan, c, &msg, &status)) {
             hal.util->persistent_data.last_mavlink_msgid = msg.msgid;
-            hal.util->perf_begin(_perf_packet);
             packetReceived(status, msg);
-            hal.util->perf_end(_perf_packet);
             parsed_packet = true;
             gcs_alternative_active[chan] = false;
             alternative.last_mavlink_ms = now_ms;
@@ -1562,8 +1542,6 @@ GCS_MAVLINK::update_receive(uint32_t max_time_us)
         try_send_message_stats.statustext_last_sent_ms = now16_ms;
     }
 #endif
-
-    hal.util->perf_end(_perf_update);    
 }
 
 /*
@@ -1849,11 +1827,10 @@ void GCS_MAVLINK::send_sensor_offsets()
 
     // run this message at a much lower rate - otherwise it
     // pointlessly wastes quite a lot of bandwidth
-    static uint8_t counter;
-    if (counter++ < 10) {
+    if (send_sensor_offsets_counter++ < 10) {
         return;
     }
-    counter = 0;
+    send_sensor_offsets_counter = 0;
 
     const Vector3f &mag_offsets = compass.get_offsets(0);
     const Vector3f &accel_offsets = ins.get_accel_offsets(0);
@@ -2525,7 +2502,7 @@ MAV_RESULT GCS_MAVLINK::handle_command_do_aux_function(const mavlink_command_lon
     }
     const RC_Channel::AUX_FUNC aux_func = (RC_Channel::AUX_FUNC)packet.param1;
     const RC_Channel::AuxSwitchPos position = (RC_Channel::AuxSwitchPos)packet.param2;
-    if (!rc().do_aux_function(aux_func, position)) {
+    if (!rc().run_aux_function(aux_func, position, RC_Channel::AuxFuncTriggerSource::MAVLINK)) {
         // note that this is not quite right; we could be more nuanced
         // about our return code here.
         return MAV_RESULT_FAILED;
@@ -2682,13 +2659,8 @@ bool GCS_MAVLINK::telemetry_delayed() const
 void GCS_MAVLINK::send_servo_output_raw()
 {
     uint16_t values[16] {};
-    if (in_hil_mode()) {
-        for (uint8_t i=0; i<16; i++) {
-            values[i] = SRV_Channels::srv_channel(i)->get_output_pwm();
-        }
-    } else {
-        hal.rcout->read(values, 16);
-    }
+    hal.rcout->read(values, 16);
+
     for (uint8_t i=0; i<16; i++) {
         if (values[i] == 65535) {
             values[i] = 0;
@@ -3230,7 +3202,7 @@ void GCS_MAVLINK::handle_command_ack(const mavlink_message_t &msg)
     }
 }
 
-// allow override of RC channel values for HIL or for complete GCS
+// allow override of RC channel values for complete GCS
 // control of switch position and RC PWM values.
 void GCS_MAVLINK::handle_rc_channels_override(const mavlink_message_t &msg)
 {
@@ -3831,9 +3803,18 @@ MAV_RESULT GCS_MAVLINK::handle_command_preflight_calibration(const mavlink_comma
     return _handle_command_preflight_calibration(packet);
 }
 
+MAV_RESULT GCS_MAVLINK::handle_command_run_prearm_checks(const mavlink_command_long_t &packet)
+{
+    if (hal.util->get_soft_armed()) {
+        return MAV_RESULT_TEMPORARILY_REJECTED;
+    }
+    (void)AP::arming().pre_arm_checks(true);
+    return MAV_RESULT_ACCEPTED;
+}
+
 MAV_RESULT GCS_MAVLINK::handle_command_preflight_can(const mavlink_command_long_t &packet)
 {
-#if HAL_MAX_CAN_PROTOCOL_DRIVERS
+#if HAL_CANMANAGER_ENABLED
     if (hal.util->get_soft_armed()) {
         // *preflight*, remember?
         return MAV_RESULT_TEMPORARILY_REJECTED;
@@ -4200,6 +4181,10 @@ MAV_RESULT GCS_MAVLINK::handle_command_long_packet(const mavlink_command_long_t 
         
     case MAV_CMD_PREFLIGHT_UAVCAN:
         result = handle_command_preflight_can(packet);
+        break;
+
+    case MAV_CMD_RUN_PREARM_CHECKS:
+        result = handle_command_run_prearm_checks(packet);
         break;
 
     case MAV_CMD_FLASH_BOOTLOADER:
@@ -4774,6 +4759,46 @@ void GCS_MAVLINK::send_generator_status() const
 #endif
 }
 
+void GCS_MAVLINK::send_water_depth() const
+{
+#if APM_BUILD_TYPE(APM_BUILD_Rover)
+    if (!HAVE_PAYLOAD_SPACE(chan, WATER_DEPTH)) {
+        return;
+    }
+
+    RangeFinder *rangefinder = RangeFinder::get_singleton();
+    if (rangefinder == nullptr || !rangefinder->has_data_orient(ROTATION_PITCH_270)) {
+        // no rangefinder or not facing downwards
+        return;
+    }
+
+    const bool sensor_healthy = (rangefinder->status_orient(ROTATION_PITCH_270) == RangeFinder::Status::Good);
+
+    // get position
+    const AP_AHRS &ahrs = AP::ahrs();
+    Location loc;
+    IGNORE_RETURN(ahrs.get_position(loc));
+
+    // get temperature
+    float temp_C = 0.0f;
+    IGNORE_RETURN(rangefinder->get_temp(ROTATION_PITCH_270, temp_C));
+
+    mavlink_msg_water_depth_send(
+        chan,
+        AP_HAL::millis(),   // time since system boot TODO: take time of measurement
+        0,                  // sensor id always zero
+        sensor_healthy,     // sensor healthy
+        loc.lat,            // latitude of vehicle
+        loc.lng,            // longitude of vehicle
+        loc.alt * 0.01f,    // altitude of vehicle (MSL)
+        ahrs.get_roll(),    // roll in radians
+        ahrs.get_pitch(),   // pitch in radians
+        ahrs.get_yaw(),     // yaw in radians
+        rangefinder->distance_cm_orient(ROTATION_PITCH_270) * 0.01f,    // distance in meters
+        temp_C);            // temperature in degC
+#endif
+}
+
 bool GCS_MAVLINK::try_send_message(const enum ap_message id)
 {
     bool ret = true;
@@ -4905,8 +4930,10 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         AP::gps().send_mavlink_gps_rtk(chan, 0);
         break;
     case MSG_GPS2_RAW:
+#if GPS_MAX_RECEIVERS > 1
         CHECK_PAYLOAD_SIZE(GPS2_RAW);
         AP::gps().send_mavlink_gps2_raw(chan);
+#endif
         break;
     case MSG_GPS2_RTK:
         CHECK_PAYLOAD_SIZE(GPS2_RTK);
@@ -5058,63 +5085,14 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
         send_autopilot_version();
         break;
 
-    case MSG_ESC_TELEMETRY: {
-#ifdef HAVE_AP_BLHELI_SUPPORT
-        CHECK_PAYLOAD_SIZE(ESC_TELEMETRY_1_TO_4);
-        AP_BLHeli *blheli = AP_BLHeli::get_singleton();
-        if (blheli) {
-            blheli->send_esc_telemetry_mavlink(uint8_t(chan));
-        }
-#endif
-#if HAL_MAX_CAN_PROTOCOL_DRIVERS
-        uint8_t num_drivers = AP::can().get_num_drivers();
-
-        for (uint8_t i = 0; i < num_drivers; i++) {
-            switch (AP::can().get_driver_type(i)) {
-                case AP_CANManager::Driver_Type_KDECAN: {
-// To be replaced with macro saying if KDECAN library is included
-#if APM_BUILD_TYPE(APM_BUILD_ArduCopter) || APM_BUILD_TYPE(APM_BUILD_ArduPlane) || APM_BUILD_TYPE(APM_BUILD_ArduSub)
-                    AP_KDECAN *ap_kdecan = AP_KDECAN::get_kdecan(i);
-                    if (ap_kdecan != nullptr) {
-                        ap_kdecan->send_mavlink(uint8_t(chan));
-                    }
-#endif
-                    break;
-                }
-                case AP_CANManager::Driver_Type_ToshibaCAN: {
-                    AP_ToshibaCAN *ap_tcan = AP_ToshibaCAN::get_tcan(i);
-                    if (ap_tcan != nullptr) {
-                        ap_tcan->send_esc_telemetry_mavlink(uint8_t(chan));
-                    }
-                    break;
-                }
-#if HAL_PICCOLO_CAN_ENABLE
-                case AP_CANManager::Driver_Type_PiccoloCAN: {
-                    AP_PiccoloCAN *ap_pcan = AP_PiccoloCAN::get_pcan(i);
-                    if (ap_pcan != nullptr) {
-                        ap_pcan->send_esc_telemetry_mavlink(uint8_t(chan));
-                    }
-                    break;
-                }
-#endif
-                case AP_CANManager::Driver_Type_UAVCAN: {
-                    AP_UAVCAN *ap_uavcan = AP_UAVCAN::get_uavcan(i);
-                    if (ap_uavcan != nullptr) {
-                        ap_uavcan->send_esc_telemetry_mavlink(uint8_t(chan));
-                    }
-                    break;
-                }
-                case AP_CANManager::Driver_Type_None:
-                default:
-                    break;
-            }
-        }
+    case MSG_ESC_TELEMETRY:
+#if HAL_WITH_ESC_TELEM
+        AP::esc_telem().send_esc_telemetry_mavlink(uint8_t(chan));
 #endif
         break;
-    }
 
     case MSG_EFI_STATUS: {
-#if EFI_ENABLED
+#if HAL_EFI_ENABLED
         CHECK_PAYLOAD_SIZE(EFI_STATUS);
         AP_EFI *efi = AP::EFI();
         if (efi) {
@@ -5127,6 +5105,11 @@ bool GCS_MAVLINK::try_send_message(const enum ap_message id)
     case MSG_WINCH_STATUS:
         CHECK_PAYLOAD_SIZE(WINCH_STATUS);
         send_winch_status();
+        break;
+
+    case MSG_WATER_DEPTH:
+        CHECK_PAYLOAD_SIZE(WATER_DEPTH);
+        send_water_depth();
         break;
 
     default:

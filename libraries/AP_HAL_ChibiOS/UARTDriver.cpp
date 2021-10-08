@@ -48,8 +48,6 @@ thread_t* volatile UARTDriver::uart_rx_thread_ctx;
 // table to find UARTDrivers from serial number, used for event handling
 UARTDriver *UARTDriver::uart_drivers[UART_MAX_DRIVERS];
 
-uint32_t UARTDriver::_last_stats_ms;
-
 // event used to wake up waiting thread. This event number is for
 // caller threads
 static const eventmask_t EVT_DATA = EVENT_MASK(10);
@@ -80,6 +78,13 @@ static const eventmask_t EVT_TRANSMIT_UNBUFFERED = EVENT_MASK(3);
 
 #ifndef HAL_UART_RX_STACK_SIZE
 #define HAL_UART_RX_STACK_SIZE 768
+#endif
+
+// threshold for disabling TX DMA due to contention
+#if defined(USART_CR1_FIFOEN)
+#define CONTENTION_BAUD_THRESHOLD 460800
+#else
+#define CONTENTION_BAUD_THRESHOLD 115200
 #endif
 
 UARTDriver::UARTDriver(uint8_t _serial_num) :
@@ -308,6 +313,25 @@ void UARTDriver::begin(uint32_t b, uint16_t rxS, uint16_t txS)
         rx_dma_enabled = rx_bounce_buf[0] != nullptr && rx_bounce_buf[1] != nullptr;
         tx_dma_enabled = tx_bounce_buf != nullptr;
     }
+    if (contention_counter > 1000 && _baudrate <= CONTENTION_BAUD_THRESHOLD) {
+        // we've previously disabled TX DMA due to contention, don't
+        // re-enable on a new begin() unless high baudrate
+        tx_dma_enabled = false;
+    }
+    if (_baudrate <= 115200 && sdef.dma_tx && Shared_DMA::is_shared(sdef.dma_tx_stream_id)) {
+        // avoid DMA on shared low-baudrate links
+        tx_dma_enabled = false;
+    }
+#endif
+
+#if defined(USART_CR1_FIFOEN)
+    // enable the UART FIFO on G4 and H7. This allows for much higher baudrates
+    // without data loss when not using DMA
+    if (_last_options & OPTION_NOFIFO) {
+        _cr1_options &= ~USART_CR1_FIFOEN;
+    } else {
+        _cr1_options |= USART_CR1_FIFOEN;
+    }
 #endif
 
     /*
@@ -366,16 +390,19 @@ void UARTDriver::begin(uint32_t b, uint16_t rxS, uint16_t txS)
                     dmaSetRequestSource(rxdma, sdef.dma_rx_channel_id);
 #endif
                 }
-                if (tx_dma_enabled) {
-                    // we only allow for sharing of the TX DMA channel, not the RX
-                    // DMA channel, as the RX side is active all the time, so
-                    // cannot be shared
-                    dma_handle = new Shared_DMA(sdef.dma_tx_stream_id,
-                                                SHARED_DMA_NONE,
-                                                FUNCTOR_BIND_MEMBER(&UARTDriver::dma_tx_allocate, void, Shared_DMA *),
-                                                FUNCTOR_BIND_MEMBER(&UARTDriver::dma_tx_deallocate, void, Shared_DMA *));
-                }
                 _device_initialised = true;
+            }
+            if (tx_dma_enabled && dma_handle == nullptr) {
+                // we only allow for sharing of the TX DMA channel, not the RX
+                // DMA channel, as the RX side is active all the time, so
+                // cannot be shared
+                dma_handle = new Shared_DMA(sdef.dma_tx_stream_id,
+                                            SHARED_DMA_NONE,
+                                            FUNCTOR_BIND_MEMBER(&UARTDriver::dma_tx_allocate, void, Shared_DMA *),
+                                            FUNCTOR_BIND_MEMBER(&UARTDriver::dma_tx_deallocate, void, Shared_DMA *));
+                if (dma_handle == nullptr) {
+                    tx_dma_enabled = false;
+                }
             }
 #endif // HAL_UART_NODMA
             sercfg.speed = _baudrate;
@@ -893,7 +920,7 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
                 return; // all done
             }
             // find out how much is still left to write while we still have the lock
-            n = _writebuf.available();
+            n = MIN(_writebuf.available(), n);
         }
 
         dma_handle->lock(); // we have our own thread so grab the lock
@@ -901,7 +928,8 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
         chEvtGetAndClearEvents(EVT_TRANSMIT_DMA_COMPLETE);
 
         if (dma_handle->has_contention()) {
-            if (_baudrate <= 115200) {
+            // on boards with a hw fifo we can use a higher threshold for disabling DMA
+            if (_baudrate <= CONTENTION_BAUD_THRESHOLD) {
                 contention_counter += 3;
                 if (contention_counter > 1000) {
                     // more than 25% of attempts to use this DMA
@@ -909,6 +937,8 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
                     // low baudrate. Switch off DMA for future
                     // transmits on this low baudrate UART
                     tx_dma_enabled = false;
+                    dma_handle->unlock(false);
+                    break;
                 }
             }
             /*
@@ -978,6 +1008,13 @@ void UARTDriver::write_pending_bytes_DMA(uint32_t n)
             // update stats
             _total_written += tx_len;
             _tx_stats_bytes += tx_len;
+
+            n -= tx_len;
+        } else {
+            // if we didn't manage to transmit any bytes then stop
+            // processing so we can check flow control state in outer
+            // loop
+            break;
         }
     }
 }
@@ -1056,6 +1093,7 @@ void UARTDriver::write_pending_bytes(void)
     if (_flow_control == FLOW_CONTROL_AUTO) {
         if (_first_write_started_us == 0) {
             _first_write_started_us = AP_HAL::micros();
+            _total_written = 0;
         }
 #ifndef HAL_UART_NODMA
         if (tx_dma_enabled) {
@@ -1671,29 +1709,24 @@ uint8_t UARTDriver::get_options(void) const
     return _last_options;
 }
 
-// request information on uart I/O for @SYS/uarts.txt
+// request information on uart I/O for @SYS/uarts.txt for this uart
 void UARTDriver::uart_info(ExpandingString &str)
 {
-    // a header to allow for machine parsers to determine format
-    str.printf("UARTV1\n");
-
     uint32_t now_ms = AP_HAL::millis();
-    for (uint8_t i = 0; i < UART_MAX_DRIVERS; i++) {
-        UARTDriver* uart = uart_drivers[i];
-
-        if (uart == nullptr || uart->uart_thread_ctx == nullptr) {
-            continue;
-        }
-
-        const char* fmt = "%-8s TX%c=%8u RX%c=%8u TXBD=%6u RXBD=%6u\n";
-        str.printf(fmt, uart->uart_thread_name, uart->tx_dma_enabled ? '*' : ' ', uart->_tx_stats_bytes,
-            uart->rx_dma_enabled ? '*' : ' ', uart->_rx_stats_bytes,
-            uart->_tx_stats_bytes * 10000 / (now_ms - _last_stats_ms), uart->_rx_stats_bytes * 10000 / (now_ms - _last_stats_ms));
-
-        uart->_tx_stats_bytes = 0;
-        uart->_rx_stats_bytes = 0;
+    if (sdef.is_usb) {
+        str.printf("OTG%u  ", unsigned(sdef.instance));
+    } else {
+        str.printf("UART%u ", unsigned(sdef.instance));
     }
-
+    str.printf("TX%c=%8u RX%c=%8u TXBD=%6u RXBD=%6u\n",
+               tx_dma_enabled ? '*' : ' ',
+               unsigned(_tx_stats_bytes),
+               rx_dma_enabled ? '*' : ' ',
+               unsigned(_rx_stats_bytes),
+               unsigned(_tx_stats_bytes * 10000 / (now_ms - _last_stats_ms)),
+               unsigned(_rx_stats_bytes * 10000 / (now_ms - _last_stats_ms)));
+    _tx_stats_bytes = 0;
+    _rx_stats_bytes = 0;
     _last_stats_ms = now_ms;
 }
 

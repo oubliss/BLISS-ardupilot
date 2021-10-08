@@ -31,6 +31,7 @@ public:
     AP_Float get_wvane_spd_tol() const{return wind_vane_spd_tol; }
     AP_Float get_wvane_enabled() const{return wind_vane_enabled; }
     AP_Float get_wvane_fs() const{return wind_vane_fs; }
+    AP_Float get_wvane_offset() const{return wind_vane_offset; }
     // Battery monitor
     AP_Float get_vpbatt_enabled() const{return vpbatt_enabled; }
     AP_Float get_vpbatt_reserve() const{return vpbatt_reserve; }
@@ -61,6 +62,7 @@ private:
     AP_Float    wind_vane_spd_tol;
     AP_Float    wind_vane_enabled; 
     AP_Float    wind_vane_fs;
+    AP_Float    wind_vane_offset;
 
     //CASS Vertical profiling smart Battery monitor params
     AP_Float    vpbatt_enabled;

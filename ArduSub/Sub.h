@@ -255,10 +255,6 @@ private:
 
     AP_Motors6DOF motors;
 
-    // GPS variables
-    // Sometimes we need to remove the scaling for distance calcs
-    float scaleLongDown;
-
     // Auto
     AutoMode auto_mode;   // controls which auto controller is run
 
@@ -550,9 +546,6 @@ private:
     void init_rangefinder(void);
     void read_rangefinder(void);
     bool rangefinder_alt_ok(void) const;
-#if OPTFLOW == ENABLED
-    void init_optflow();
-#endif
     void terrain_update();
     void terrain_logging();
     void init_ardupilot() override;

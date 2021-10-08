@@ -100,10 +100,10 @@ public:
         k_param_throttle_accel_enabled,     // deprecated - remove
         k_param_wp_yaw_behavior,
         k_param_acro_trainer,
-        k_param_pilot_speed_up,    // renamed from k_param_pilot_velocity_z_max
-        k_param_circle_rate,                // deprecated - remove
-        k_param_rangefinder_gain,
-        k_param_ch8_option_old, // deprecated
+        k_param_pilot_speed_up,         // renamed from k_param_pilot_velocity_z_max
+        k_param_circle_rate,            // deprecated - remove
+        k_param_rangefinder_gain,       // deprecated - remove
+        k_param_ch8_option_old,         // deprecated
         k_param_arming_check_old,       // deprecated - remove
         k_param_sprayer,
         k_param_angle_max,
@@ -403,10 +403,6 @@ public:
     AP_Int8         rtl_alt_type;
 #endif
 
-#if RANGEFINDER_ENABLED == ENABLED
-    AP_Float        rangefinder_gain;
-#endif
-
     AP_Int8         failsafe_gcs;               // ground station failsafe behavior
     AP_Int16        gps_hdop_good;              // GPS Hdop value at or below this value represent a good position
 
@@ -645,6 +641,13 @@ public:
 
     AP_Int32 flight_options;
 
+#if RANGEFINDER_ENABLED == ENABLED
+    AP_Float rangefinder_filt;
+#endif
+
+#if MODE_GUIDED_ENABLED == ENABLED
+    AP_Float guided_timeout;
+#endif
 };
 
 extern const AP_Param::Info        var_info[];

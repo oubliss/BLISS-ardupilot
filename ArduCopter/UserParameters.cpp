@@ -26,12 +26,13 @@ const AP_Param::GroupInfo UserParameters::var_info[] = {
     AP_GROUPINFO("_WV_SPDTOL", 11, UserParameters, wind_vane_spd_tol, 19.0f),
     AP_GROUPINFO("_WV_RTLEN", 12, UserParameters, wind_vane_enabled, 1.0f),
     AP_GROUPINFO("_WV_FS", 13, UserParameters, wind_vane_fs, 10.0f),
+    AP_GROUPINFO("_WV_OFFSET", 14, UserParameters, wind_vane_offset, 0.0f),
     // VPBatt
-    AP_GROUPINFO("_VPBATT_EN", 14, UserParameters, vpbatt_enabled, 1.0f),
-    AP_GROUPINFO("_VPBATT_RES", 15, UserParameters, vpbatt_reserve, 30.0f),
-    AP_GROUPINFO("_VPBATT_WH", 16, UserParameters, vpbatt_wh, 89.0f),
+    AP_GROUPINFO("_VPBATT_EN", 15, UserParameters, vpbatt_enabled, 1.0f),
+    AP_GROUPINFO("_VPBATT_RES", 16, UserParameters, vpbatt_reserve, 30.0f),
+    AP_GROUPINFO("_VPBATT_WH", 17, UserParameters, vpbatt_wh, 89.0f),
     // Mission Auto-generator
-    AP_GROUPINFO("_AUTOVP_ALT", 17, UserParameters, autovp_max_altitude, 120.0f),
+    AP_GROUPINFO("_AUTOVP_ALT", 18, UserParameters, autovp_max_altitude, 120.0f),
     
     AP_GROUPEND
 };

@@ -92,7 +92,7 @@ void GCS_MAVLINK_Sub::send_nav_controller_output() const
         targets.z * 1.0e-2f,
         sub.wp_nav.get_wp_bearing_to_destination() * 1.0e-2f,
         MIN(sub.wp_nav.get_wp_distance_to_destination() * 1.0e-2f, UINT16_MAX),
-        sub.pos_control.get_alt_error() * 1.0e-2f,
+        sub.pos_control.get_pos_error_z_cm() * 1.0e-2f,
         0,
         0);
 }
@@ -576,7 +576,7 @@ void GCS_MAVLINK_Sub::handleMessage(const mavlink_message_t &msg)
             climb_rate_cms = (packet.thrust - 0.5f) * 2.0f * sub.wp_nav.get_default_speed_up();
         } else {
             // descend at up to WPNAV_SPEED_DN
-            climb_rate_cms = (packet.thrust - 0.5f) * 2.0f * fabsf(sub.wp_nav.get_default_speed_down());
+            climb_rate_cms = (packet.thrust - 0.5f) * 2.0f * sub.wp_nav.get_default_speed_down();
         }
         sub.guided_set_angle(Quaternion(packet.q[0],packet.q[1],packet.q[2],packet.q[3]), climb_rate_cms);
         break;
@@ -679,7 +679,7 @@ void GCS_MAVLINK_Sub::handleMessage(const mavlink_message_t &msg)
          */
 
         if (!pos_ignore && sub.control_mode == ALT_HOLD) { // Control only target depth when in ALT_HOLD
-            sub.pos_control.set_alt_target(packet.alt*100);
+            sub.pos_control.set_pos_target_z_cm(packet.alt*100);
             break;
         }
 

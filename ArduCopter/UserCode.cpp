@@ -331,7 +331,7 @@ void Copter::user_wind_vane()
             thrvec_z = filt_thrvec_z.apply(R33);
 
             //Determine wind direction by trigonometry (thrust vector tilt)
-            float wind_psi = fmodf(atan2f(thrvec_y,thrvec_x),2*M_PI)*RAD_TO_DEG;
+            float wind_psi = fmodf(atan2f(thrvec_y,thrvec_x),2*M_PI)*RAD_TO_DEG + g2.user_parameters.get_wvane_offset();
             _wind_dir = wrap_360_cd(wind_psi*100.0f);
 
             //Estimate wind speed with filtered parameters
@@ -410,8 +410,7 @@ void Copter::user_wind_vane()
         filt_thrvec_z.reset();
     }
 
-    //Wind Data Logger ///////////////////////////////////////////////////////////////////////////////////////////
-
+    // Wind Data Logger ///////////////////////////////////////////////////////////////////////////////////////////
     // Write wind direction packet into the SD card
     struct log_WIND pkt_wind_est = {
         LOG_PACKET_HEADER_INIT(LOG_WIND_MSG),

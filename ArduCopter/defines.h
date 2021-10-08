@@ -18,20 +18,17 @@ enum autopilot_yaw_mode {
     AUTO_YAW_FIXED =            3,  // point towards a particular angle (no pilot input accepted)
     AUTO_YAW_LOOK_AHEAD =       4,  // point in the direction the copter is moving
     AUTO_YAW_RESETTOARMEDYAW =  5,  // point towards heading at time motors were armed
-    AUTO_YAW_RATE =             6,  // turn at a specified rate (held in auto_yaw_rate)
-    AUTO_YAW_CIRCLE =           7,  // use AC_Circle's provided yaw (used during Loiter-Turns commands)
-    AUTO_YAW_INTO_WIND =        8,  // CASS: turn into wind moving verticaly or steady (for vertical profiles)
-    AUTO_YAW_WIND_CT2 =         9,  // CASS: point to specific vector for CT2 profiling
+    AUTO_YAW_ANGLE_RATE =       6,  // turn at a specified rate from a starting angle
+    AUTO_YAW_RATE =             7,  // turn at a specified rate (held in auto_yaw_rate)
+    AUTO_YAW_CIRCLE =           8,  // use AC_Circle's provided yaw (used during Loiter-Turns commands)
+    AUTO_YAW_INTO_WIND =        9,  // CASS: turn into wind moving verticaly or steady (for vertical profiles)
+    AUTO_YAW_WIND_CT2 =         10  // CASS: point to specific vector for CT2 profiling
 };
 
 // Frame types
 #define UNDEFINED_FRAME 0
 #define MULTICOPTER_FRAME 1
 #define HELI_FRAME 2
-
-// HIL enumerations
-#define HIL_MODE_DISABLED               0
-#define HIL_MODE_SENSORS                1
 
 // Tuning enumeration
 enum tuning_func {
@@ -59,7 +56,7 @@ enum tuning_func {
     TUNING_DECLINATION =                38, // compass declination in radians
     TUNING_CIRCLE_RATE =                39, // circle turn rate in degrees (hard coded to about 45 degrees in either direction)
     TUNING_ACRO_YAW_KP =                40, // acro controller's P term.  converts pilot input to a desired roll, pitch or yaw rate
-    TUNING_RANGEFINDER_GAIN =           41, // rangefinder gain
+    TUNING_RANGEFINDER_GAIN =           41, // unused
     TUNING_EKF_VERTICAL_POS =           42, // unused
     TUNING_EKF_HORIZONTAL_POS =         43, // unused
     TUNING_EKF_ACCEL_NOISE =            44, // unused
@@ -87,34 +84,12 @@ enum tuning_func {
 #define WP_YAW_BEHAVIOR_INTO_WIND                     4   // CASS: auto pilot will look into the wind
 #define WP_YAW_BEHAVIOR_WIND_CT2                      5   // CASS: auto pilot CT2 wind vector
 
-// Auto modes
-enum AutoMode {
-    Auto_TakeOff,
-    Auto_WP,
-    Auto_Land,
-    Auto_RTL,
-    Auto_CircleMoveToEdge,
-    Auto_Circle,
-    Auto_NavGuided,
-    Auto_Loiter,
-    Auto_LoiterToAlt,
-    Auto_NavPayloadPlace,
-};
 
 // Airmode
 enum class AirMode {
     AIRMODE_NONE,
     AIRMODE_DISABLED,
     AIRMODE_ENABLED,
-};
-
-// Safe RTL states
-enum SmartRTLState {
-    SmartRTL_WaitForPathCleanup,
-    SmartRTL_PathFollow,
-    SmartRTL_PreLandPosition,
-    SmartRTL_Descend,
-    SmartRTL_Land
 };
 
 enum PayloadPlaceStateType {
@@ -135,7 +110,6 @@ enum PayloadPlaceStateType {
 enum DevOptions {
     DevOptionADSBMAVLink = 1,
     DevOptionVFR_HUDRelativeAlt = 2,
-    DevOptionSetAttitudeTarget_ThrustAsThrust = 4,
 };
 
 //  Logging parameters

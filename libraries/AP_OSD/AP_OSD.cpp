@@ -173,8 +173,8 @@ const AP_Param::GroupInfo AP_OSD::var_info[] = {
 #if AP_TERRAIN_AVAILABLE
     // @Param: _W_TERR
     // @DisplayName: Terrain warn level
-    // @Description: Set level below which HGT_TER item will flash. -1 disables
-    // @Range: 1 3000
+    // @Description: Set level below which TER_HGT item will flash. -1 disables.
+    // @Range: -1 3000
     // @Units: m
     // @User: Standard
     AP_GROUPINFO("_W_TERR", 23, AP_OSD, warn_terr, -1),
@@ -423,8 +423,11 @@ void AP_OSD::update_current_screen()
     case PWM_RANGE:
         for (int i=0; i<AP_OSD_NUM_SCREENS; i++) {
             if (get_screen(i).enabled && get_screen(i).channel_min <= channel_value && get_screen(i).channel_max > channel_value) {
+                if (previous_pwm_screen == i) {
+                    break;
+                } else {
                 current_screen = previous_pwm_screen = i;
-                break;
+                }
             }
         }
         break;

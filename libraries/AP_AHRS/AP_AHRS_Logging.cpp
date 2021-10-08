@@ -110,7 +110,8 @@ void AP_AHRS_View::Write_AttitudeView(const Vector3f &targets) const
         control_yaw     : (uint16_t)wrap_360_cd(targets.z),
         yaw             : (uint16_t)wrap_360_cd(yaw_sensor),
         error_rp        : (uint16_t)(get_error_rp() * 100),
-        error_yaw       : (uint16_t)(get_error_yaw() * 100)
+        error_yaw       : (uint16_t)(get_error_yaw() * 100),
+        active          : AP::ahrs().get_active_AHRS_type(),
     };
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }
@@ -120,7 +121,7 @@ void AP_AHRS_View::Write_Rate(const AP_Motors &motors, const AC_AttitudeControl 
                                 const AC_PosControl &pos_control) const
 {
     const Vector3f &rate_targets = attitude_control.rate_bf_targets();
-    const Vector3f &accel_target = pos_control.get_accel_target();
+    const Vector3f &accel_target = pos_control.get_accel_target_cmss();
     const struct log_Rate pkt_rate{
         LOG_PACKET_HEADER_INIT(LOG_RATE_MSG),
         time_us         : AP_HAL::micros64(),

@@ -426,7 +426,13 @@ void SITL_State::_update_gps_ubx(const struct gps_data *d, uint8_t instance)
         const Vector3f ant2_pos = _sitl->gps_pos_offset[instance].get();
         Vector3f rel_antenna_pos = ant2_pos - ant1_pos;
         Matrix3f rot;
+        // project attitude back using gyros to get antenna orientation at time of GPS sample
+        Vector3f gyro(radians(_sitl->state.rollRate),
+                      radians(_sitl->state.pitchRate),
+                      radians(_sitl->state.yawRate));
         rot.from_euler(radians(_sitl->state.rollDeg), radians(_sitl->state.pitchDeg), radians(d->yaw));
+        const float lag = (1.0/_sitl->gps_hertz[instance]) * gps_state[instance].delay;
+        rot.rotate(gyro * (-lag));
         rel_antenna_pos = rot * rel_antenna_pos;
         relposned.version = 1;
         relposned.iTOW = time_week_ms;
@@ -1212,6 +1218,15 @@ void SITL_State::_update_gps(double latitude, double longitude, float altitude,
                              double yaw, bool _have_lock)
 {
     char c;
+
+    if (AP_HAL::millis() < 20000) {
+        // apply the init offsets for the first 20s. This allows for
+        // having the origin a long way from the takeoff location,
+        // which makes testing long flights easier
+        latitude += _sitl->gps_init_lat_ofs;
+        longitude += _sitl->gps_init_lon_ofs;
+        altitude += _sitl->gps_init_alt_ofs;
+    }
 
     //Capture current position as basestation location for
     if (!_gps_has_basestation_position &&

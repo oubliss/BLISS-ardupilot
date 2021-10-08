@@ -81,6 +81,8 @@ struct sitl_fdm {
         float speed;
         float direction;
     } wind_vane_apparent;
+
+    bool is_lock_step_scheduled;
 };
 
 // number of rc output channels
@@ -208,6 +210,11 @@ public:
     AP_Vector3f gps_pos_offset[2];  // XYZ position of the GPS antenna phase centre relative to the body frame origin (m)
     AP_Float gps_accuracy[2];
     AP_Vector3f gps_vel_err[2]; // Velocity error offsets in NED (x = N, y = E, z = D)
+
+    // initial offset on GPS lat/lon, used to shift origin
+    AP_Float gps_init_lat_ofs;
+    AP_Float gps_init_lon_ofs;
+    AP_Float gps_init_alt_ofs;
 
     AP_Float batt_voltage; // battery voltage base
     AP_Float batt_capacity_ah; // battery capacity in Ah
@@ -415,6 +422,9 @@ public:
     RichenPower richenpower_sim;
     IntelligentEnergy24 ie24_sim;
 
+    // ESC telemetry
+    AP_Int8 esc_telem;
+
     struct {
         // LED state, for serial LED emulation
         struct {
@@ -461,6 +471,9 @@ public:
     // gyro and accel fail masks
     AP_Int8 gyro_fail_mask;
     AP_Int8 accel_fail_mask;
+
+    // Sailboat sim only
+    AP_Int8 sail_type;
 
 };
 

@@ -814,7 +814,7 @@ private:
     void update_load_factor(void);
     void adjust_altitude_target();
     void setup_glide_slope(void);
-    int32_t get_RTL_altitude() const;
+    int32_t get_RTL_altitude_cm() const;
     float relative_ground_altitude(bool use_rangefinder_if_available);
     void set_target_altitude_current(void);
     void set_target_altitude_current_adjusted(void);
@@ -854,10 +854,9 @@ private:
     void calc_nav_yaw_course(void);
     void calc_nav_yaw_ground(void);
 
-    // GCS_Mavlink.cpp
-    void send_servo_out(mavlink_channel_t chan);
-
     // Log.cpp
+    uint32_t last_log_fast_ms;
+
     void Log_Write_Fast(void);
     void Log_Write_Attitude(void);
     void Log_Write_Startup(uint8_t type);
@@ -1142,10 +1141,18 @@ private:
 
     FlareMode flare_mode;
 
+    // expo handling
+    float roll_in_expo(bool use_dz) const;
+    float pitch_in_expo(bool use_dz) const;
+    float rudder_in_expo(bool use_dz) const;
+
 public:
     void failsafe_check(void);
+#ifdef ENABLE_SCRIPTING
     bool set_target_location(const Location& target_loc) override;
     bool get_target_location(Location& target_loc) override;
+#endif // ENABLE_SCRIPTING
+
 };
 
 extern Plane plane;

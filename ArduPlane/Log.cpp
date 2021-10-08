@@ -48,7 +48,15 @@ void Plane::Log_Write_Attitude(void)
 // do fast logging for plane
 void Plane::Log_Write_Fast(void)
 {
-    if (should_log(MASK_LOG_ATTITUDE_FAST)) {
+    if (!should_log(MASK_LOG_ATTITUDE_FULLRATE)) {
+        uint32_t now = AP_HAL::millis();
+        if (now - last_log_fast_ms < 40) {
+            // default to 25Hz
+            return;
+        }
+        last_log_fast_ms = now;
+    }
+    if (should_log(MASK_LOG_ATTITUDE_FAST | MASK_LOG_ATTITUDE_FULLRATE)) {
         Log_Write_Attitude();
     }
 }
@@ -314,7 +322,6 @@ const struct LogStructure Plane::log_structure[] = {
 
 // @LoggerMessage: NTUN
 // @Description: Navigation Tuning information - e.g. vehicle destination
-// @URL: http://ardupilot.org/rover/docs/navigation.html
 // @Field: TimeUS: Time since system startup
 // @Field: Dist: distance to the current navigation waypoint
 // @Field: TBrg: bearing to the current navigation waypoint
@@ -322,7 +329,6 @@ const struct LogStructure Plane::log_structure[] = {
 // @Field: AltErr: difference between current vehicle height and target height
 // @Field: XT: the vehicle's current distance from the current travel segment
 // @Field: XTi: integration of the vehicle's crosstrack error
-// @Field: AspdE: difference between vehicle's airspeed and desired airspeed
 // @Field: AspdE: difference between vehicle's airspeed and desired airspeed
 // @Field: TLat: target latitude
 // @Field: TLng: target longitude
@@ -338,8 +344,8 @@ const struct LogStructure Plane::log_structure[] = {
 // @Field: Axis: tuning axis
 // @Field: State: tuning state
 // @Field: Sur: control surface deflection
-// @Field: Tar: target rate
-// @Field: Act: actual rate
+// @Field: PSlew: P slew rate
+// @Field: DSlew: D slew rate
 // @Field: FF0: FF value single sample
 // @Field: FF: FF value
 // @Field: P: P value
@@ -349,7 +355,7 @@ const struct LogStructure Plane::log_structure[] = {
 // @Field: RMAX: Rate maximum
 // @Field: TAU: time constant
     { LOG_ATRP_MSG, sizeof(AP_AutoTune::log_ATRP),
-      "ATRP", "QBBffffffffBff", "TimeUS,Axis,State,Sur,Tar,Act,FF0,FF,P,I,D,Action,RMAX,TAU", "s#-dkk------ks", "F--00000000-00" },
+      "ATRP", "QBBffffffffBff", "TimeUS,Axis,State,Sur,PSlew,DSlew,FF0,FF,P,I,D,Action,RMAX,TAU", "s#-dkk------ks", "F--00000000-00" },
 
 // @LoggerMessage: STAT
 // @Description: Current status of the aircraft

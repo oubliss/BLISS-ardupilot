@@ -30,6 +30,7 @@ public:
 
     // update the state structure
     virtual void update() = 0;
+    virtual void init_serial(uint8_t serial_instance) {};
 
     virtual void handle_msg(const mavlink_message_t &msg) { return; }
 #if HAL_MSP_RANGEFINDER_ENABLED
@@ -58,6 +59,9 @@ public:
 
     // return system time of last successful read from the sensor
     uint32_t last_reading_ms() const { return state.last_reading_ms; }
+
+    // get temperature reading in C.  returns true on success and populates temp argument
+    virtual bool get_temp(float &temp) { return false; }
 
 protected:
 

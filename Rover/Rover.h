@@ -68,6 +68,7 @@
 #include <AP_Follow/AP_Follow.h>
 #include <AP_OSD/AP_OSD.h>
 #include <AP_WindVane/AP_WindVane.h>
+#include <AP_Motors/AP_MotorsUGV.h>
 
 #ifdef ENABLE_SCRIPTING
 #include <AP_Scripting/AP_Scripting.h>
@@ -78,7 +79,6 @@
 #endif
 
 // Local modules
-#include "AP_MotorsUGV.h"
 #include "mode.h"
 #include "AP_Arming.h"
 #include "sailboat.h"
@@ -264,8 +264,8 @@ private:
 
     // cruise throttle and speed learning
     typedef struct {
-        LowPassFilterFloat speed_filt = LowPassFilterFloat(2.0f);
-        LowPassFilterFloat throttle_filt = LowPassFilterFloat(2.0f);
+        LowPassFilterFloat speed_filt{2.0f};
+        LowPassFilterFloat throttle_filt{2.0f};
         uint32_t learn_start_ms;
         uint32_t log_count;
     } cruise_learn_t;
@@ -274,10 +274,12 @@ private:
 private:
 
     // Rover.cpp
+#ifdef ENABLE_SCRIPTING
     bool set_target_location(const Location& target_loc) override;
     bool set_target_velocity_NED(const Vector3f& vel_ned) override;
     bool set_steering_and_throttle(float steering, float throttle) override;
     bool get_control_output(AP_Vehicle::ControlOutput control_output, float &control_value) override;
+#endif // ENABLE_SCRIPTING
     void stats_update();
     void ahrs_update();
     void gcs_failsafe_check(void);
