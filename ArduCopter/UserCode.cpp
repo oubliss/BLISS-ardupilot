@@ -113,13 +113,13 @@ void Copter::user_vpbatt_monitor()
             Vector3f velocity;
             copter.ahrs.get_velocity_NED(velocity);
             if(velocity[2] < 0){
-                int_wvspd = int_wvspd + _wind_speed*dt/1000;
+                int_wvspd = int_wvspd + _wind_speed*dt/1000.0f;
             }
 
             // Calculate the Descent-Energy-consumption per meter height (function of wind speed)
-            float Whm = 1.5e-6f*int_wvspd + 7e-3;
+            float Whm = 1.5e-6f*int_wvspd + 7.1e-3f;
             // Constrain lower values
-            Whm = Whm > 0.01 ? Whm : 0.01;
+            Whm = Whm > 0.0105f ? Whm : 0.0105f;
             
             // Get current altitude in meters
             copter.ahrs.get_relative_position_D_home(alt);
@@ -156,12 +156,14 @@ void Copter::user_vpbatt_monitor()
             vpbatt_now = AP_HAL::millis();
 
             //Print on terminal for debugging
-            printf("Whc: %5.2f \n",Whc);
-            printf("Vel_Z: %5.2f \n",velocity[2]);
-            printf("int_wvspd: %5.4f \n",int_wvspd);
-            printf("Whm: %5.4f \n",Whm);
-            printf("Whn: %5.2f \n",Whn);
-            printf("Wh_tot: %5.2f \n",Wh_tot);
+            #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+            // printf("Whc: %5.2f \n",Whc);
+            // printf("Vel_Z: %5.2f \n",velocity[2]);
+            // printf("int_wvspd: %5.4f \n",int_wvspd);
+            // printf("Whm: %5.4f \n",Whm);
+            // printf("Whn: %5.2f \n",Whn);
+            // printf("Wh_tot: %5.2f \n",Wh_tot);
+            #endif
         }
     }
     else{
@@ -441,7 +443,9 @@ void Copter::userhook_auxSwitch1()
         int32_t vp_lng = copter.current_loc.lng; // ahrs.get_home().lng;
 
         // clear mission
-        copter.mode_auto.mission.clear();
+        if(!copter.mode_auto.mission.clear()){
+            gcs().send_text(MAV_SEVERITY_WARNING, "AutoVP: Mission could not be cleared");
+        }
         
         // Command #0 : home
         cmd.id = MAV_CMD_NAV_WAYPOINT;

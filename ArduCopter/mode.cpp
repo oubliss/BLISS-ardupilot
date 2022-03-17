@@ -464,16 +464,15 @@ void Mode::make_safe_ground_handling(bool force_throttle_unlimited)
         motors->set_desired_spool_state(AP_Motors::DesiredSpoolState::GROUND_IDLE);
     }
 
-
+    // aircraft is landed, integrator terms must be reset regardless of spool state
+    attitude_control->reset_rate_controller_I_terms_smoothly();
+ 
     switch (motors->get_spool_state()) {
-
     case AP_Motors::SpoolState::SHUT_DOWN:
     case AP_Motors::SpoolState::GROUND_IDLE:
-        // relax controllers during idle states
-        attitude_control->reset_rate_controller_I_terms_smoothly();
+        // reset yaw targets and rates during idle states
         attitude_control->reset_yaw_target_and_rate();
         break;
-
     case AP_Motors::SpoolState::SPOOLING_UP:
     case AP_Motors::SpoolState::THROTTLE_UNLIMITED:
     case AP_Motors::SpoolState::SPOOLING_DOWN:
@@ -590,11 +589,21 @@ void Mode::land_run_horizontal_control()
             }
         }
 
-        // get pilot's desired yaw rate
-        target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
-        if (!is_zero(target_yaw_rate)) {
-            auto_yaw.set_mode(AUTO_YAW_HOLD);
+        // BLISS modification. Ignore pilot yaw input above 20m when in RTL/Landing
+        target_yaw_rate = 0;
+        if (!copter.failsafe.radio && use_pilot_yaw() && copter.current_loc.alt < RTL_ALT_MIN*10) {
+            // get pilot's desired yaw rate
+            target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
+            if (!is_zero(target_yaw_rate)) {
+                auto_yaw.set_mode(AUTO_YAW_HOLD);
+            }
         }
+
+        // // get pilot's desired yaw rate
+        // target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
+        // if (!is_zero(target_yaw_rate)) {
+        //     auto_yaw.set_mode(AUTO_YAW_HOLD);
+        // }
     }
 
 #if PRECISION_LANDING == ENABLED
