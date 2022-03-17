@@ -159,11 +159,10 @@ void ModeRTL::climb_return_run()
 
     // process pilot's yaw input
     float target_yaw_rate = 0;
-    if (!copter.failsafe.radio && use_pilot_yaw()) {
+    if (!copter.failsafe.radio && use_pilot_yaw() && copter.current_loc.alt < RTL_ALT_MIN*10) {
         // get pilot's desired yaw rate
         target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
-        //CASS modification: Avoid pilot yaw input while in wind estimator mode
-        if (!is_zero(target_yaw_rate) && auto_yaw.default_mode(true) != AUTO_YAW_INTO_WIND && auto_yaw.default_mode(true) != AUTO_YAW_WIND_CT2) {
+        if (!is_zero(target_yaw_rate)) {
             auto_yaw.set_mode(AUTO_YAW_HOLD);
         }
     }
@@ -226,11 +225,10 @@ void ModeRTL::loiterathome_run()
 
     // process pilot's yaw input
     float target_yaw_rate = 0;
-    if (!copter.failsafe.radio && use_pilot_yaw()) {
+    if (!copter.failsafe.radio && use_pilot_yaw() && copter.current_loc.alt < RTL_ALT_MIN*10) {
         // get pilot's desired yaw rate
         target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
-        //CASS modification: Avoid pilot yaw input while in wind estimator mode
-        if (!is_zero(target_yaw_rate) && auto_yaw.default_mode(true) != AUTO_YAW_INTO_WIND && auto_yaw.default_mode(true) != AUTO_YAW_WIND_CT2) {
+        if (!is_zero(target_yaw_rate)) {
             auto_yaw.set_mode(AUTO_YAW_HOLD);
         }
     }
@@ -316,6 +314,7 @@ void ModeRTL::descent_run()
         return;
     }
 
+    printf("Alt: %5.2f \n",(float)copter.current_loc.alt);
     // process pilot's input
     if (!copter.failsafe.radio) {
         if ((g.throttle_behavior & THR_BEHAVE_HIGH_THROTTLE_CANCELS_LAND) != 0 && copter.rc_throttle_control_in_filter.get() > LAND_CANCEL_TRIGGER_THR){
@@ -342,7 +341,7 @@ void ModeRTL::descent_run()
             }
         }
 
-        if (g.land_repositioning || use_pilot_yaw()) {
+        if ((g.land_repositioning || use_pilot_yaw()) && copter.current_loc.alt < RTL_ALT_MIN*10) {
             // get pilot's desired yaw rate
             target_yaw_rate = get_pilot_desired_yaw_rate(channel_yaw->get_control_in());
         }

@@ -76,30 +76,30 @@ private:
      */
     const struct Model {
         // model mass kg
-        float mass = 3.0;
+        float mass = 1.95;
 
         // diameter of model
-        float diagonal_size = 0.35;
+        float diagonal_size = 0.49;
 
         /*
           the ref values are for a test at fixed angle, used to estimate drag
          */
-        float refSpd = 15.08; // m/s
-        float refAngle = 45;  // degrees
-        float refVoltage = 12.09; // Volts
-        float refCurrent = 29.3; // Amps
-        float refAlt = 593; // altitude AMSL
-        float refTempC = 25; // temperature C
+        float refSpd = 7.7; // m/s
+        float refAngle = 9.24;  // degrees
+        float refVoltage = 14.88; // Volts
+        float refCurrent = 16.5; // Amps
+        float refAlt = 438; // altitude AMSL
+        float refTempC = 27; // temperature C
         float refBatRes = 0.01; // BAT.Res
 
         // full pack voltage
-        float maxVoltage = 4.2*3;
+        float maxVoltage = 4.3*4;
 
         // battery capacity in Ah. Use zero for unlimited
-        float battCapacityAh = 0.0;
+        float battCapacityAh = 5.650;
 
         // CTUN.ThO at bover at refAlt
-        float hoverThrOut = 0.39;
+        float hoverThrOut = 0.2689;
 
         // MOT_THST_EXPO
         float propExpo = 0.65;
@@ -122,7 +122,7 @@ private:
 
         // rotor disc area in m**2 for 4 x 0.35m dia rotors
         // Note that coaxial rotors count as one rotor only when cauclating effective disc area
-        float disc_area = 0.385;
+        float disc_area = 0.245;
 
         // momentum drag coefficient
         float mdrag_coef = 0.2;
