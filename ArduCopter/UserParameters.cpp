@@ -33,6 +33,9 @@ const AP_Param::GroupInfo UserParameters::var_info[] = {
     AP_GROUPINFO("_VPBATT_WH", 17, UserParameters, vpbatt_wh, 89.0f),
     // Mission Auto-generator
     AP_GROUPINFO("_AUTOVP_ALT", 18, UserParameters, autovp_max_altitude, 120.0f),
+    // GPS-based Lidar activation
+    AP_GROUPINFO("_LIDAR_ALT", 19, UserParameters, gpslidar_alt, 80.0f),
+    AP_GROUPINFO("_LIDAR_HUM", 20, UserParameters, gpslidar_hum, 90.0f),
     
     AP_GROUPEND
 };

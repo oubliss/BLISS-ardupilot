@@ -18,7 +18,7 @@ uint32_t wvane_now;
 //Declare digital LPF
 LPFrdFloat filt_thrvec_x;
 LPFrdFloat filt_thrvec_y;
-LPFrdFloat filt_thrvec_z;
+LPFrdFloat filt_windspd;
 //g.wind_vane_wsA -> Coefficient A of the linear wind speed equation, from calibration
 //g.wind_vane_wsB -> Coefficient B of the linear wind speed equation, from calibration
 //g.wind_vane_min_roll -> Minimum roll angle that the wind vane will correct (too low and the copter will oscilate)
@@ -65,13 +65,13 @@ void Copter::userhook_init()
         //Min Fc = 0.05 for stable yaw
         filt_thrvec_x.set_cutoff_frequency(Fss,0.05);
         filt_thrvec_y.set_cutoff_frequency(Fss,0.05);
-        filt_thrvec_z.set_cutoff_frequency(Fss,0.05);
+        filt_windspd.set_cutoff_frequency(Fss,0.5);
     }
     else{
         //Initialize Butterworth filter
         filt_thrvec_x.set_cutoff_frequency(Fss,g2.user_parameters.get_wvane_cutoff());
         filt_thrvec_y.set_cutoff_frequency(Fss,g2.user_parameters.get_wvane_cutoff());
-        filt_thrvec_z.set_cutoff_frequency(Fss,g2.user_parameters.get_wvane_cutoff());
+        filt_windspd.set_cutoff_frequency(Fss,0.5);
     }
 
     //VPBatt_monitor initilize
@@ -117,7 +117,7 @@ void Copter::user_vpbatt_monitor()
             }
 
             // Calculate the Descent-Energy-consumption per meter height (function of wind speed)
-            float Whm = 1.5e-6f*int_wvspd + 7.1e-3f;
+            float Whm = 2.0e-6f*int_wvspd + 8.0e-3f;
             // Constrain lower values
             Whm = Whm > 0.0105f ? Whm : 0.0105f;
             
@@ -327,19 +327,19 @@ void Copter::user_wind_vane()
         //Wind vane loop starts here. Loop frequency is defined by WVANE_FS param in Hz
         if((AP_HAL::millis() - wvane_now) >= (uint32_t)(1000/g2.user_parameters.get_wvane_fs())){
             //Apply Butterworth LPF on each element
-            float thrvec_x, thrvec_y, thrvec_z;
+            float thrvec_x, thrvec_y;
             thrvec_x = filt_thrvec_x.apply(R13);
             thrvec_y = filt_thrvec_y.apply(R23);
-            thrvec_z = filt_thrvec_z.apply(R33);
 
             //Determine wind direction by trigonometry (thrust vector tilt)
             float wind_psi = fmodf(atan2f(thrvec_y,thrvec_x),2*M_PI)*RAD_TO_DEG + g2.user_parameters.get_wvane_offset();
             _wind_dir = wrap_360_cd(wind_psi*100.0f);
 
             //Estimate wind speed with filtered parameters
-            float thrvec_xy = safe_sqrt(thrvec_x*thrvec_x + thrvec_y*thrvec_y);
-            _wind_speed = g2.user_parameters.get_wvane_wsA() * fabsf(thrvec_xy/thrvec_z) + g2.user_parameters.get_wvane_wsB()*safe_sqrt(fabsf(thrvec_xy/thrvec_z));
+            float R_xy = safe_sqrt(R13*R13 + R23*R23);
+            _wind_speed = g2.user_parameters.get_wvane_wsA() * fabsf(R_xy/R33) + g2.user_parameters.get_wvane_wsB()*safe_sqrt(fabsf(R_xy/R33));
             _wind_speed = _wind_speed < 0 ? 0.0f : _wind_speed;
+            _wind_speed = filt_windspd.apply(_wind_speed);
 
             //Get current velocity
             Vector3f vel_xyz = copter.inertial_nav.get_velocity(); // NEU convention
@@ -349,9 +349,9 @@ void Copter::user_wind_vane()
             
             //Wind vane is active when flying horizontally steady and wind speed is perceivable
             //Condition when ascending
-            if(fabsf(speed_y) < 100.0f && _wind_speed > 1.0f && vel_xyz[2] >= 0.0f){
+            if(fabsf(speed_y) < 150.0f && _wind_speed > 1.0f && vel_xyz[2] >= 0.0f){
                 //Min altitude and speed at which the yaw command is sent
-                if(alt>400.0f && speed<(fabsf(speed_y)+100.0f)){ 
+                if(alt>400.0f && speed<(fabsf(speed_y)+300.0f)){ 
                     //Send estimated wind direction to the autopilot
                     copter.cass_wind_direction = _wind_dir;
                     copter.cass_wind_speed = _wind_speed;
@@ -363,8 +363,8 @@ void Copter::user_wind_vane()
                 }
             }
             //Condition when descending
-            else if (fabsf(speed_y) < 100.0f && _wind_speed > 3.0f && vel_xyz[2] < 0.0f){
-                if(alt>600.0f && speed<(fabsf(speed_y)+100.0f)){ 
+            else if (fabsf(speed_y) < 150.0f && _wind_speed > 3.0f && vel_xyz[2] < 0.0f){
+                if(alt>600.0f && speed<(fabsf(speed_y)+300.0f)){ 
                     //Send estimated wind direction to the autopilot
                     copter.cass_wind_direction = _wind_dir;
                     copter.cass_wind_speed = _wind_speed;
@@ -409,7 +409,7 @@ void Copter::user_wind_vane()
         _fan_status = false;
         filt_thrvec_x.reset();
         filt_thrvec_y.reset();
-        filt_thrvec_z.reset();
+        filt_windspd.reset();
     }
 
     // Wind Data Logger ///////////////////////////////////////////////////////////////////////////////////////////

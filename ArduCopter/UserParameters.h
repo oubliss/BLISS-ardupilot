@@ -38,6 +38,9 @@ public:
     AP_Float get_vpbatt_wh() const{return vpbatt_wh; }
     // Mission auto-generator
     AP_Float get_autovp_max_alt() const{return autovp_max_altitude; }
+    // GPS-based Lidar activation
+    AP_Float get_gpslidar_alt() const{return gpslidar_alt; }
+    AP_Float get_gpslidar_hum() const{return gpslidar_hum; }
     
 private:
     // Put your parameter variable definitions here
@@ -71,4 +74,9 @@ private:
 
     //CASS AutoVP mission auto-generation
     AP_Float    autovp_max_altitude;
+
+    // GPS-based Lidar activation
+    AP_Float    gpslidar_alt;
+    AP_Float    gpslidar_hum;
+
 };
