@@ -36,6 +36,8 @@ public:
     AP_Float get_vpbatt_enabled() const{return vpbatt_enabled; }
     AP_Float get_vpbatt_reserve() const{return vpbatt_reserve; }
     AP_Float get_vpbatt_wh() const{return vpbatt_wh; }
+    AP_Float get_batt_max_curr() const{return batt_max_curr; }
+    AP_Float get_batt_max_curr_timeout() const{return max_curr_timeout; }
     // Mission auto-generator
     AP_Float get_autovp_max_alt() const{return autovp_max_altitude; }
     // GPS-based Lidar activation
@@ -71,6 +73,8 @@ private:
     AP_Float    vpbatt_enabled;
     AP_Float    vpbatt_reserve;
     AP_Float    vpbatt_wh;
+    AP_Float    batt_max_curr;
+    AP_Float    max_curr_timeout;
 
     //CASS AutoVP mission auto-generation
     AP_Float    autovp_max_altitude;

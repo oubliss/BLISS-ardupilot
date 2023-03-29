@@ -31,6 +31,8 @@ const AP_Param::GroupInfo UserParameters::var_info[] = {
     AP_GROUPINFO("_VPBATT_EN", 15, UserParameters, vpbatt_enabled, 1.0f),
     AP_GROUPINFO("_VPBATT_RES", 16, UserParameters, vpbatt_reserve, 30.0f),
     AP_GROUPINFO("_VPBATT_WH", 17, UserParameters, vpbatt_wh, 89.0f),
+    AP_GROUPINFO("_MAX_CURR", 21, UserParameters, batt_max_curr, 45.0f),
+    AP_GROUPINFO("_CURR_TOUT", 22, UserParameters, max_curr_timeout, 5.0f),
     // Mission Auto-generator
     AP_GROUPINFO("_AUTOVP_ALT", 18, UserParameters, autovp_max_altitude, 120.0f),
     // GPS-based Lidar activation

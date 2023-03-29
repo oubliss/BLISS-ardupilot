@@ -33,6 +33,8 @@ float int_wvspd; // Wind speed history or memory while ascending
 uint32_t vpbatt_now;
 bool batt_home_ok;
 bool batt_warning_flag;
+float overcurr_timer;
+float no_curr_timer;
 
 //AutoVP mission generation
 uint32_t mission_now;
@@ -79,6 +81,8 @@ void Copter::userhook_init()
     batt_home_ok = true;
     batt_warning_flag = false;
     vpbatt_now = AP_HAL::millis();
+    overcurr_timer = AP_HAL::millis();
+    no_curr_timer = AP_HAL::millis();
 
     // Initialize Fan Control
     SRV_Channels::set_output_scaled(SRV_Channel::k_egg_drop, fan_pwm_off);
@@ -144,7 +148,7 @@ void Copter::user_vpbatt_monitor()
 
                 // Trigger RTL when max battery altitude range is reached
                 if(Wh_tot >= 1.0f && batt_home_ok == true){
-                    gcs().send_text(MAV_SEVERITY_WARNING, "Max Batt range: Switch to RTL");
+                    gcs().send_text(MAV_SEVERITY_WARNING, "Max Batt range: Switched to RTL");
                     // It will still warn, even if the function is disabled
                     if(!is_zero(g2.user_parameters.get_vpbatt_enabled())){
                         copter.set_mode(Mode::Number::RTL, ModeReason::UNKNOWN);
@@ -152,6 +156,31 @@ void Copter::user_vpbatt_monitor()
                     batt_home_ok = false;
                 }
             }
+
+            //Switch to RTL if current is higher than threshold
+            if(current > g2.user_parameters.get_batt_max_curr()){
+                if(AP_HAL::millis() - overcurr_timer > g2.user_parameters.get_batt_max_curr_timeout()*1000){
+                    copter.set_mode(Mode::Number::RTL, ModeReason::UNKNOWN);
+                    gcs().send_text(MAV_SEVERITY_WARNING, "Max current reached: Switched to RTL");
+                    batt_home_ok = false;
+                }
+            }
+            else{
+                overcurr_timer = AP_HAL::millis();
+            }
+
+            //Switch to RTL if no current is measured
+            if(current < 3.0f){
+                if(AP_HAL::millis() - no_curr_timer > 20000){
+                    copter.set_mode(Mode::Number::RTL, ModeReason::UNKNOWN);
+                    gcs().send_text(MAV_SEVERITY_WARNING, "No power data: Switched to RTL");
+                    batt_home_ok = false;
+                }
+            }
+            else{
+                no_curr_timer = AP_HAL::millis();
+            }
+
             // Update time
             vpbatt_now = AP_HAL::millis();
 
@@ -168,6 +197,8 @@ void Copter::user_vpbatt_monitor()
     }
     else{
         vpbatt_now = AP_HAL::millis();
+        overcurr_timer = AP_HAL::millis();
+        no_curr_timer = AP_HAL::millis();
         int_wvspd = 0.0f;
     }
 }
@@ -518,7 +549,14 @@ void Copter::userhook_auxSwitch1()
 
         // Send successful creation message
         gcs().send_text(MAV_SEVERITY_INFO, "AutoVP mission received");
-        gcs().send_text(MAV_SEVERITY_INFO, "Target alt: %f m",max_alt/100);
+        gcs().send_text(MAV_SEVERITY_INFO, "Target alt: %g m",max_alt/100);
+
+        // Print failsafe parameters for reviewing
+        gcs().send_text(MAV_SEVERITY_INFO, "Review failsafe parameters");
+        gcs().send_text(MAV_SEVERITY_INFO, "Max Wind: %g m/s",float(g2.user_parameters.get_wvane_spd_tol()));
+        gcs().send_text(MAV_SEVERITY_INFO, "Min Voltage: %g V",float(copter.battery.get_low_voltage()));
+        gcs().send_text(MAV_SEVERITY_INFO, "Max Current: %g A",float(g2.user_parameters.get_batt_max_curr()));
+
 
         mission_now = AP_HAL::millis();
     }
