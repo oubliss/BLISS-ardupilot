@@ -31,6 +31,8 @@ def build(bld):
             'AP_OSD',
             'AC_AutoTune',
             'AP_KDECAN',
+            'AC_CASS_IMET',
+            'AC_CASS_HYT271',
         ],
     )
 
