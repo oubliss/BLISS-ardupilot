@@ -579,14 +579,25 @@ bool AP_MotorsMatrix::setup_quad_matrix(motor_frame_type frame_type)
     switch (frame_type) {
     case MOTOR_FRAME_TYPE_PLUS: {
         _frame_type_string = "PLUS";
-        static const AP_MotorsMatrix::MotorDef motors[] {
-            {  90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  2 },
-            { -90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  4 },
-            {   0, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   1 },
-            { 180, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   3 },
-        };
-        add_motors(motors, ARRAY_SIZE(motors));
-        break;
+        #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+            static const AP_MotorsMatrix::MotorDef motors[] {
+                {  90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  2 },
+                { -90, AP_MOTORS_MATRIX_YAW_FACTOR_CCW,  4 },
+                {   0, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   1 },
+                { 180, AP_MOTORS_MATRIX_YAW_FACTOR_CW,   3 },
+            };
+            add_motors(motors, ARRAY_SIZE(motors));
+            break;
+        #else
+            static const AP_MotorsMatrix::MotorDef motors[] {
+                {   45, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  1 },
+                { -135, AP_MOTORS_MATRIX_YAW_FACTOR_CW,  3 },
+                {  -45, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 4 },
+                {  135, AP_MOTORS_MATRIX_YAW_FACTOR_CCW, 2 },
+            };
+            add_motors(motors, ARRAY_SIZE(motors));
+            break;
+        #endif
     }
     case MOTOR_FRAME_TYPE_X: {
         _frame_type_string = "X";

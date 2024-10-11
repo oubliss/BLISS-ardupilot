@@ -73,6 +73,10 @@
 #include <AP_OpticalFlow/AP_OpticalFlow.h>
 #include <AP_Winch/AP_Winch_config.h>
 
+// CASS libraries declaration
+#include <AC_CASS_IMET/AC_CASS_Imet.h>
+#include <AC_CASS_HYT271/AC_CASS_HYT271.h>
+
 // Configuration
 #include "defines.h"
 #include "config.h"
@@ -172,10 +176,10 @@
 #include "avoidance_adsb.h"
 #endif
 // Local modules
-#include "Parameters.h"
 #if USER_PARAMS_ENABLED
 #include "UserParameters.h"
 #endif
+#include "Parameters.h"
 #include "mode.h"
 
 class Copter : public AP_Vehicle {
@@ -259,6 +263,11 @@ private:
     // flight modes convenience array
     AP_Int8 *flight_modes;
     const uint8_t num_flight_modes = 6;
+
+    // Imet Temperature sensors class declaration
+    AC_CASS_Imet CASS_Imet[4]; 
+    // HYT271 humidity sensors class declaration
+    AC_CASS_HYT271 CASS_HYT271[4];
 
     struct RangeFinderState {
         bool enabled:1;
@@ -968,13 +977,21 @@ private:
     // UserCode.cpp
     void userhook_init();
     void userhook_FastLoop();
-    void userhook_50Hz();
-    void userhook_MediumLoop();
-    void userhook_SlowLoop();
-    void userhook_SuperSlowLoop();
+    void user_vpbatt_monitor();
+    void user_temperature_logger();
+    void user_humidity_logger();
+    void user_wind_vane();
     void userhook_auxSwitch1(const RC_Channel::AuxSwitchPos ch_flag);
     void userhook_auxSwitch2(const RC_Channel::AuxSwitchPos ch_flag);
     void userhook_auxSwitch3(const RC_Channel::AuxSwitchPos ch_flag);
+
+    // CASS Mavlink message
+    void send_cass_imet(mavlink_channel_t chan);
+    void send_cass_hyt271(mavlink_channel_t chan);
+
+    // CASS Libraries sensor code initilizer
+    void init_CASS_imet(void);
+    void init_CASS_hyt271(void);
 
 #if MODE_ACRO_ENABLED == ENABLED
 #if FRAME_CONFIG == HELI_FRAME

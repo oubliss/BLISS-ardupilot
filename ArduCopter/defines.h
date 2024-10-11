@@ -67,7 +67,8 @@ enum tuning_func {
 #define WP_YAW_BEHAVIOR_LOOK_AT_NEXT_WP               1   // auto pilot will face next waypoint or home during rtl
 #define WP_YAW_BEHAVIOR_LOOK_AT_NEXT_WP_EXCEPT_RTL    2   // auto pilot will face next waypoint except when doing RTL at which time it will stay in it's last
 #define WP_YAW_BEHAVIOR_LOOK_AHEAD                    3   // auto pilot will look ahead during missions and rtl (primarily meant for traditional helicopters)
-
+#define WP_YAW_BEHAVIOR_INTO_WIND                     4   // CASS: auto pilot will look into the wind
+#define WP_YAW_BEHAVIOR_WIND_CT2                      5   // CASS: auto pilot CT2 wind vector
 
 // Airmode
 enum class AirMode {
@@ -95,7 +96,11 @@ enum LoggingParameters {
      LOG_GUIDED_POSITION_TARGET_MSG,
      LOG_SYSIDD_MSG,
      LOG_SYSIDS_MSG,
-     LOG_GUIDED_ATTITUDE_TARGET_MSG
+     LOG_GUIDED_ATTITUDE_TARGET_MSG,
+     // BLISS log structure definition
+     LOG_IMET_MSG,
+     LOG_RH_MSG,
+     LOG_WIND_MSG
 };
 
 #define MASK_LOG_ATTITUDE_FAST          (1<<0)
