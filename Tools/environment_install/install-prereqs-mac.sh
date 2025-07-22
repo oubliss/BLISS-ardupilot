@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 echo "---------- $0 start ----------"
 set -e
 set -x
@@ -42,7 +42,7 @@ echo "Checking homebrew..."
 $(which -s brew) ||
 {
     echo "installing homebrew..."
-    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+    /usr/bin/env bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 } 
 echo "Homebrew installed"
 
@@ -52,7 +52,7 @@ echo "Checking CLI Tools installed..."
     ERROR=$(xcode-select --install 2>&1 > /dev/null)
 } ||
 {
-if [[ $ERROR != *"command line tools are already installed"* ]]; then
+if [[ $ERROR != *"ommand line tools are already installed"* ]]; then
     echo "$ERROR" 1>&2
     exit 1
 fi
@@ -78,6 +78,7 @@ function install_arm_none_eabi_toolchain() {
         )
     fi
     echo "Registering STM32 Toolchain for ccache"
+    sudo mkdir -p /usr/local/opt/ccache/libexec
     sudo ln -s -f $CCACHE_PATH /usr/local/opt/ccache/libexec/arm-none-eabi-g++
     sudo ln -s -f $CCACHE_PATH /usr/local/opt/ccache/libexec/arm-none-eabi-gcc
     echo "Done!"
@@ -103,10 +104,11 @@ function maybe_prompt_user() {
 # see https://github.com/orgs/Homebrew/discussions/3895
 find /usr/local/bin -lname '*/Library/Frameworks/Python.framework/*' -delete
 
+# brew update randomly failing on CI, so ignore errors:
 brew update
-brew install gawk curl coreutils wget
+brew install --force --overwrite gawk coreutils wget
 
-PIP=pip
+PIP="python3 -m pip"
 if maybe_prompt_user "Install python using pyenv [N/y]?" ; then
     echo "Checking pyenv..."
     {
@@ -159,7 +161,7 @@ if [[ $DO_AP_STM_ENV -eq 1 ]]; then
     install_arm_none_eabi_toolchain
 fi
 
-PYTHON_PKGS="future lxml pymavlink MAVProxy pexpect geocoder flake8 empy dronecan"
+PYTHON_PKGS="setuptools future lxml matplotlib pymavlink MAVProxy pexpect geocoder flake8 junitparser empy==3.3.4 dronecan"
 # add some Python packages required for commonly-used MAVProxy modules and hex file generation:
 if [[ $SKIP_AP_EXT_ENV -ne 1 ]]; then
     PYTHON_PKGS="$PYTHON_PKGS intelhex gnureadline"
@@ -170,7 +172,7 @@ if [[ $SKIP_AP_GRAPHIC_ENV -ne 1 ]]; then
 fi
 
 $PIP install --upgrade pip
-$PIP install wheel
+$PIP install --force-reinstall wheel
 $PIP install $PYTHON_PKGS
 
 echo "Adding ArduPilot Tools to environment"

@@ -12,9 +12,11 @@
 #
 # You should have received a copy of the GNU General Public License along
 # with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# flake8: noqa
+
 '''calibration simulation command handling'''
 
-from __future__ import division, print_function
 import math
 from pymavlink import quaternion
 import random
@@ -303,7 +305,7 @@ class MagcalController(CalController):
                 # this is set to None so we can ensure we don't get
                 # progress reports for completed compasses.
                 self.last_progress[m.compass_id] = None
-            if len(self.last_progress.values()) and all(progress == None for progress in self.last_progress.values()):
+            if len(self.last_progress.values()) and all(progress is None for progress in self.last_progress.values()):
                 self.stop()
             return
 

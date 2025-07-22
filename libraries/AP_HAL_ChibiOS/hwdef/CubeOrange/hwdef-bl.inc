@@ -7,8 +7,8 @@ USB_STRING_MANUFACTURER "Hex/ProfiCNC"
 # crystal frequency
 OSCILLATOR_HZ 24000000
 
-# board ID for firmware load
-APJ_BOARD_ID 140
+# board ID. See Tools/AP_Bootloader/board_types.txt
+APJ_BOARD_ID AP_HW_CUBEORANGE
 
 FLASH_SIZE_KB 2048
 
@@ -34,7 +34,7 @@ PD6 USART2_RX USART2
 PD8 USART3_TX USART3
 PD9 USART3_RX USART3
 
-# UART7 maps to uartF in the HAL (serial5 in SERIALn_ parameters).
+# UART7 maps to SERIAL5.
 PE7 UART7_RX UART7
 PE8 UART7_TX UART7
 

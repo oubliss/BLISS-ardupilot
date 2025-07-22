@@ -36,13 +36,16 @@ public:
     /* Do not allow copies */
     CLASS_NO_COPY(AP_Camera_Backend);
 
-    enum CAMOPTIONS {
-        NONE = 0,
-        REC_ARM_DISARM = 1, // Recording start/stop on Arm/Disarm
+    // camera options parameter values
+    enum class Option : uint8_t {
+        RecordWhileArmed = (1 << 0U)
     };
+    bool option_is_enabled(Option option) const {
+        return ((uint8_t)_params.options.get() & (uint8_t)option) != 0;
+    }
 
     // init - performs any required initialisation
-    virtual void init() {};
+    virtual void init();
 
     // update - should be called at 50hz
     virtual void update();
@@ -59,6 +62,9 @@ public:
     // take multiple pictures, time_interval between two consecutive pictures is in miliseconds
     // total_num is number of pictures to be taken, -1 means capture forever
     void take_multiple_pictures(uint32_t time_interval_ms, int16_t total_num);
+
+    // stop capturing multiple image sequence
+    void stop_capture();
 
     // entry point to actually take a picture.  returns true on success
     virtual bool trigger_pic() = 0;
@@ -82,14 +88,23 @@ public:
     // set camera lens as a value from 0 to 5
     virtual bool set_lens(uint8_t lens) { return false; }
 
+#if AP_CAMERA_SET_CAMERA_SOURCE_ENABLED
+    // set_camera_source is functionally the same as set_lens except primary and secondary lenses are specified by type
+    virtual bool set_camera_source(AP_Camera::CameraSource primary_source, AP_Camera::CameraSource secondary_source) { return false; }
+#endif
+
+    // get camera image horizontal or vertical field of view in degrees.  returns 0 if unknown
+    float horizontal_fov() const { return MAX(0, _params.hfov); }
+    float vertical_fov() const { return MAX(0, _params.vfov); }
+
     // handle MAVLink messages from the camera
     virtual void handle_message(mavlink_channel_t chan, const mavlink_message_t &msg) {}
 
     // configure camera
-    virtual void configure(float shooting_mode, float shutter_speed, float aperture, float ISO, float exposure_type, float cmd_id, float engine_cutoff_time) {}
+    virtual void configure(float shooting_mode, float shutter_speed, float aperture, float ISO, int32_t exposure_type, int32_t cmd_id, float engine_cutoff_time) {}
 
     // handle camera control
-    virtual void control(float session, float zoom_pos, float zoom_step, float focus_lock, float shooting_cmd, float cmd_id);
+    virtual void control(float session, float zoom_pos, float zoom_step, float focus_lock, int32_t shooting_cmd, int32_t cmd_id);
 
     // set camera trigger distance in meters
     void set_trigger_distance(float distance_m) { _params.trigg_dist.set(distance_m); }
@@ -100,13 +115,39 @@ public:
     // send camera information message to GCS
     virtual void send_camera_information(mavlink_channel_t chan) const;
 
+#if AP_MAVLINK_MSG_VIDEO_STREAM_INFORMATION_ENABLED
+    // send video stream information message to GCS
+    virtual void send_video_stream_information(mavlink_channel_t chan) const;
+#endif // AP_MAVLINK_MSG_VIDEO_STREAM_INFORMATION_ENABLED
+
+#if AP_CAMERA_INFO_FROM_SCRIPT_ENABLED
+    void set_camera_information(mavlink_camera_information_t camera_info);
+    void set_stream_information(mavlink_video_stream_information_t stream_info);
+#endif // AP_CAMERA_INFO_FROM_SCRIPT_ENABLED
+
     // send camera settings message to GCS
     virtual void send_camera_settings(mavlink_channel_t chan) const;
+
+#if AP_CAMERA_SEND_FOV_STATUS_ENABLED
+    // send camera field of view status
+    void send_camera_fov_status(mavlink_channel_t chan) const;
+#endif
+
+    // send camera capture status message to GCS
+    virtual void send_camera_capture_status(mavlink_channel_t chan) const;
+
+#if AP_CAMERA_SEND_THERMAL_RANGE_ENABLED
+    // send camera thermal range message to GCS
+    virtual void send_camera_thermal_range(mavlink_channel_t chan) const {};
+#endif
 
 #if AP_CAMERA_SCRIPTING_ENABLED
     // accessor to allow scripting backend to retrieve state
     // returns true on success and cam_state is filled in
     virtual bool get_state(AP_Camera::camera_state_t& cam_state) { return false; }
+
+    // change camera settings not normally used by autopilot
+    virtual bool change_setting(CameraSetting setting, float value) { return false; }
 #endif
 
 protected:
@@ -126,9 +167,9 @@ protected:
     struct {
         uint64_t timestamp_us;      // system time of most recent image
         Location location;          // location where most recent image was taken
-        int32_t roll_sensor;        // vehicle roll in centi-degrees
-        int32_t pitch_sensor;       // vehicle pitch in centi-degrees
-        int32_t yaw_sensor;         // vehicle yaw in centi-degrees
+        float roll_deg;             // vehicle roll in degrees
+        float pitch_deg;            // vehicle pitch in degrees
+        float yaw_deg;              // vehicle yaw in degrees
         uint32_t feedback_trigger_logged_count; // ID sequence number
     } camera_feedback;
 
@@ -149,6 +190,11 @@ protected:
 
     // get mavlink gimbal device id which is normally mount_instance+1
     uint8_t get_gimbal_device_id() const;
+
+#if AP_CAMERA_INFO_FROM_SCRIPT_ENABLED
+    mavlink_camera_information_t _camera_info;
+    mavlink_video_stream_information_t _stream_info;
+#endif // AP_CAMERA_INFO_FROM_SCRIPT_ENABLED
 
     // internal members
     uint8_t _instance;      // this instance's number

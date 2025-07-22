@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 '''
 Run autotest repeatedly at different speedups to help find best default speedup
@@ -52,7 +52,7 @@ class CheckAutoTestSpeedup(object):
                     # select not available on Windows... probably...
                 time.sleep(0.1)
                 continue
-            if type(x) == bytes:
+            if isinstance(x, bytes):
                 x = x.decode('utf-8')
             self.program_output += x
             x = x.rstrip()

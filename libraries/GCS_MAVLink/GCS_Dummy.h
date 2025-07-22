@@ -1,3 +1,7 @@
+#include "GCS_config.h"
+
+#if HAL_GCS_ENABLED
+
 #include "GCS.h"
 #include <AP_Common/AP_FWVersion.h>
 
@@ -19,23 +23,17 @@ public:
 
 private:
 
-    uint32_t telem_delay() const override { return 0; }
-    void handleMessage(const mavlink_message_t &msg) override {}
     bool try_send_message(enum ap_message id) override { return true; }
-    bool handle_guided_request(AP_Mission::Mission_Command &cmd) override { return true; }
-    uint8_t sysid_my_gcs() const override { return 1; }
 
 protected:
 
     // dummy information:
-    MAV_MODE base_mode() const override { return (MAV_MODE)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED; }
+    uint8_t base_mode() const override { return (uint8_t)MAV_MODE_FLAG_CUSTOM_MODE_ENABLED; }
     MAV_STATE vehicle_system_status() const override { return MAV_STATE_CALIBRATING; }
-
-    bool set_home_to_current_location(bool _lock) override { return false; }
-    bool set_home(const Location& loc, bool _lock) override { return false; }
 
     void send_nav_controller_output() const override {};
     void send_pid_tuning() override {};
+    uint8_t send_available_mode(uint8_t index) const override { return 0; }
 };
 
 /*
@@ -52,11 +50,8 @@ public:
 
 protected:
 
-    uint8_t sysid_this_mav() const override { return 1; }
-
-    GCS_MAVLINK_Dummy *new_gcs_mavlink_backend(GCS_MAVLINK_Parameters &params,
-                                               AP_HAL::UARTDriver &uart) override {
-        return new GCS_MAVLINK_Dummy(params, uart);
+    GCS_MAVLINK_Dummy *new_gcs_mavlink_backend(AP_HAL::UARTDriver &uart) override {
+        return NEW_NOTHROW GCS_MAVLINK_Dummy(uart);
     }
 
 private:
@@ -72,3 +67,5 @@ private:
     MAV_TYPE frame_type() const override { return MAV_TYPE_FIXED_WING; }
     uint32_t custom_mode() const override { return 3; } // magic number
 };
+
+#endif  // HAL_GCS_ENABLED

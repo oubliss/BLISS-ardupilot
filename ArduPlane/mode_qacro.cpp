@@ -9,7 +9,7 @@ bool ModeQAcro::_enter()
     quadplane.transition->force_transition_complete();
     attitude_control->relax_attitude_controllers();
 
-    // disable yaw rate time contant to mantain old behaviour
+    // disable yaw rate time constant to maintain old behaviour
     quadplane.disable_yaw_rate_time_constant();
 
     IGNORE_RETURN(ahrs.get_quaternion(plane.mode_acro.acro_state.q));
@@ -63,9 +63,9 @@ void ModeQAcro::run()
 
         // run attitude controller
         if (plane.g.acro_locking) {
-            attitude_control->input_rate_bf_roll_pitch_yaw_3(target_roll, target_pitch, target_yaw);
+            attitude_control->input_rate_bf_roll_pitch_yaw_3_cds(target_roll, target_pitch, target_yaw);
         } else {
-            attitude_control->input_rate_bf_roll_pitch_yaw_2(target_roll, target_pitch, target_yaw);
+            attitude_control->input_rate_bf_roll_pitch_yaw_2_cds(target_roll, target_pitch, target_yaw);
         }
 
         // output pilot's throttle without angle boost

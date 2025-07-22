@@ -17,9 +17,10 @@ public:
                           AP_BattMonitor_Params &params);
 
     bool has_cell_voltages() const override { return false; }
-    bool has_temperature() const override { return false; }
+    bool has_temperature() const override { return has_temp; }
     bool has_current() const override { return true; }
     bool get_cycle_count(uint16_t &cycles) const override { return false; }
+    bool get_temperature(float &temperature) const override;
 
     void init(void) override;
     void read() override;
@@ -27,13 +28,14 @@ public:
     static const struct AP_Param::GroupInfo var_info[];
 
 private:
-    AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev;
+    AP_HAL::I2CDevice *dev;
 
     enum class DevType : uint8_t {
         UNKNOWN = 0,
         INA226,
         INA228,
         INA238,
+        INA231,
     };
 
     static const uint8_t i2c_probe_addresses[];
@@ -52,6 +54,7 @@ private:
     AP_Int8 i2c_bus;
     AP_Int8 i2c_address;
     AP_Float max_amps;
+    AP_Float rShunt;
     uint32_t failed_reads;
 
     struct {
@@ -62,6 +65,10 @@ private:
     } accumulate;
     float current_LSB;
     float voltage_LSB;
+
+    float temperature;
+
+    bool has_temp;
 };
 
 #endif // AP_BATTERY_INA2XX_ENABLED

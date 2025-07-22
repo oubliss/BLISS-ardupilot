@@ -22,6 +22,10 @@
 // optional uprintf() code for debug
 // #define BOOTLOADER_DEBUG SD1
 
+#ifndef AP_BOOTLOADER_ALWAYS_ERASE
+#define AP_BOOTLOADER_ALWAYS_ERASE 0
+#endif
+
 #if defined(BOOTLOADER_DEV_LIST)
 static BaseChannel *uarts[] = { BOOTLOADER_DEV_LIST };
 #if HAL_USE_SERIAL == TRUE
@@ -32,10 +36,6 @@ static uint8_t last_uart;
 
 #ifndef BOOTLOADER_BAUDRATE
 #define BOOTLOADER_BAUDRATE 115200
-#endif
-
-#ifndef AP_BOOTLOADER_ALWAYS_ERASE
-#define AP_BOOTLOADER_ALWAYS_ERASE 0
 #endif
 
 // #pragma GCC optimize("O0")
@@ -78,8 +78,11 @@ void cout(uint8_t *data, uint32_t len)
 }
 #endif // BOOTLOADER_DEV_LIST
 
+// page at which the main firmware starts
 static uint32_t flash_base_page;
+// number of pages for the main firmware
 static uint16_t num_pages;
+// flash address of the main firmware
 static const uint8_t *flash_base = (const uint8_t *)(0x08000000 + (FLASH_BOOTLOADER_LOAD_KB + APP_START_OFFSET_KB)*1024U);
 
 /*
@@ -141,6 +144,11 @@ uint32_t flash_func_sector_size(uint32_t sector)
         return 0;
     }
     return stm32_flash_getpagesize(flash_base_page+sector);
+}
+
+bool flash_func_is_erased(uint32_t sector)
+{
+    return stm32_flash_ispageerased(flash_base_page+sector);
 }
 
 bool flash_func_erase_sector(uint32_t sector, bool force_erase)
@@ -348,6 +356,28 @@ void uprintf(const char *fmt, ...)
 #endif
 }
 
+void thread_sleep_ms(uint32_t ms)
+{
+    while (ms > 0) {
+        // don't sleep more than 65 at a time, to cope with 16 bit
+        // timer
+        const uint32_t dt = ms > 65? 65: ms;
+        chThdSleepMilliseconds(dt);
+        ms -= dt;
+    }
+}
+
+void thread_sleep_us(uint32_t us)
+{
+    while (us > 0) {
+        // don't sleep more than 65 at a time, to cope with 16 bit
+        // timer
+        const uint32_t dt = us > 6500? 6500: us;
+        chThdSleepMicroseconds(dt);
+        us -= dt;
+    }
+}
+
 // generate a pulse sequence forever, for debugging
 void led_pulses(uint8_t npulses)
 {
@@ -355,11 +385,11 @@ void led_pulses(uint8_t npulses)
     while (true) {
         for (uint8_t i=0; i<npulses; i++) {
             led_on(LED_BOOTLOADER);
-            chThdSleepMilliseconds(200);
+            thread_sleep_ms(200);
             led_off(LED_BOOTLOADER);
-            chThdSleepMilliseconds(200);
+            thread_sleep_ms(200);
         }
-        chThdSleepMilliseconds(2000);
+        thread_sleep_ms(2000);
     }
 }
 
@@ -429,9 +459,13 @@ void init_uarts(void)
 #if HAL_USE_SERIAL_USB == TRUE
     sduObjectInit(&SDU1);
     sduStart(&SDU1, &serusbcfg1);
-    
+#if HAL_HAVE_DUAL_USB_CDC
+    sduObjectInit(&SDU2);
+    sduStart(&SDU2, &serusbcfg2);
+#endif
+
     usbDisconnectBus(serusbcfg1.usbp);
-    chThdSleepMilliseconds(1000);
+    thread_sleep_ms(1000);
     usbStart(serusbcfg1.usbp, &usbcfg);
     usbConnectBus(serusbcfg1.usbp);
 #endif
@@ -441,7 +475,11 @@ void init_uarts(void)
 
     for (const auto &uart : uarts) {
 #if HAL_USE_SERIAL_USB == TRUE
-        if (uart == (BaseChannel *)&SDU1) {
+        if (uart == (BaseChannel *)&SDU1
+#if HAL_HAVE_DUAL_USB_CDC
+         || uart == (BaseChannel *)&SDU2
+#endif
+         ) {
             continue;
         }
 #endif
@@ -451,13 +489,52 @@ void init_uarts(void)
 }
 
 
+#if defined(BOOTLOADER_FORWARD_OTG2_SERIAL)
+/* forward serial to OTG2
+Used for devices containing multiple devices in one
+*/
+static SerialConfig forward_sercfg;
+static uint32_t otg2_serial_deadline_ms;
+bool update_otg2_serial_forward()
+{
+    // get baudrate set on SDU2 and set it on BOOTLOADER_FORWARD_OTG2_SERIAL if changed
+    if (forward_sercfg.speed != BOOTLOADER_FORWARD_OTG2_SERIAL_BAUDRATE) {
+        forward_sercfg.speed = BOOTLOADER_FORWARD_OTG2_SERIAL_BAUDRATE;
+#if defined(BOOTLOADER_FORWARD_OTG2_SERIAL_SWAP) && BOOTLOADER_FORWARD_OTG2_SERIAL_SWAP
+        forward_sercfg.cr2 = USART_CR2_SWAP;
+#endif
+        sdStart(&BOOTLOADER_FORWARD_OTG2_SERIAL, &forward_sercfg);
+    }
+    // check how many bytes are available to read from BOOTLOADER_FORWARD_OTG2_SERIAL
+    uint8_t data[SERIAL_BUFFERS_SIZE]; // read upto SERIAL_BUFFERS_SIZE at a time
+    int n = chnReadTimeout(&SDU2, data, SERIAL_BUFFERS_SIZE, TIME_IMMEDIATE);
+    if (n > 0) {
+        // do a blocking write to BOOTLOADER_FORWARD_OTG2_SERIAL
+        chnWriteTimeout(&BOOTLOADER_FORWARD_OTG2_SERIAL, data, n, TIME_IMMEDIATE);
+        otg2_serial_deadline_ms = AP_HAL::millis() + 1000;
+    }
+
+    n = chnReadTimeout(&BOOTLOADER_FORWARD_OTG2_SERIAL, data, SERIAL_BUFFERS_SIZE, TIME_IMMEDIATE);
+    if (n > 0) {
+        // do a blocking write to SDU2
+        chnWriteTimeout(&SDU2, data, n, TIME_IMMEDIATE);
+    }
+
+    return (AP_HAL::millis() < otg2_serial_deadline_ms);
+}
+#endif
+
 /*
   set baudrate on the current port
  */
 void port_setbaud(uint32_t baudrate)
 {
 #if HAL_USE_SERIAL_USB == TRUE
-    if (uarts[last_uart] == (BaseChannel *)&SDU1) {
+    if (uarts[last_uart] == (BaseChannel *)&SDU1
+#if HAL_HAVE_DUAL_USB_CDC
+     || uarts[last_uart] == (BaseChannel *)&SDU2
+#endif
+     ) {
         // can't set baudrate on USB
         return;
     }
@@ -470,3 +547,123 @@ void port_setbaud(uint32_t baudrate)
 }
 #endif // BOOTLOADER_DEV_LIST
 
+#if AP_FLASH_ECC_CHECK_ENABLED
+/*
+  check if flash has any ECC errors and if it does then erase all of
+  flash
+ */
+#define ECC_CHECK_CHUNK_SIZE (32*sizeof(uint32_t))
+
+#define ECC_CHECK_DEBUG 0
+
+#if ECC_CHECK_DEBUG
+static void usb_printf(const char *fmt, ...)
+{
+    va_list ap;
+    char umsg[200];
+    va_start(ap, fmt);
+    uint32_t n = vsnprintf(umsg, sizeof(umsg), fmt, ap);
+    va_end(ap);
+    if (n > sizeof(umsg)) {
+        n = sizeof(umsg);
+    }
+    chnWriteTimeout(&SDU1, (const uint8_t *)umsg, n, chTimeMS2I(100));
+}
+#endif // ECC_CHECK_DEBUG
+
+/*
+  check a flash region for ECC errors, starting at start_page and
+  checking num_pages_chk pages. If any ECC errors are found then
+  the pages are erased.
+ */
+static void check_ecc_flash_region(uint16_t start_page, uint16_t num_pages_chk)
+{
+    auto *dma = dmaStreamAlloc(STM32_DMA_STREAM_ID(1, 1), 0, nullptr, nullptr);
+
+    uint32_t *buf = (uint32_t*)malloc_dma(ECC_CHECK_CHUNK_SIZE);
+
+    if (buf == nullptr || dma == nullptr) {
+        // DMA'ble memory not available
+        return;
+    }
+
+    // clear any single or double bit ECC errors that may be already set
+    // from bootup
+    FLASH->CCR1 |= FLASH_CCR_CLR_DBECCERR | FLASH_CCR_CLR_SNECCERR;
+#if BOARD_FLASH_SIZE > 1024
+    FLASH->CCR2 |= FLASH_CCR_CLR_DBECCERR | FLASH_CCR_CLR_SNECCERR;
+#endif
+    
+    uint32_t page_size = stm32_flash_getpagesize(start_page);
+    uint32_t ofs = page_size * start_page;
+    uint32_t ofs_hwm = page_size * (start_page + num_pages_chk);
+    while (ofs < ofs_hwm) {
+        if (FLASH->SR1 & (FLASH_SR_DBECCERR)) {
+            break;
+        }
+#if BOARD_FLASH_SIZE > 1024
+        if (FLASH->SR2 & (FLASH_SR_DBECCERR)) {
+            break;
+        }
+#endif
+        dmaStartMemCopy(dma,
+                        STM32_DMA_CR_PL(0) | STM32_DMA_CR_PSIZE_BYTE |
+                        STM32_DMA_CR_MSIZE_BYTE,
+                        ofs+(uint8_t*)FLASH_BASE, buf, ECC_CHECK_CHUNK_SIZE);
+        dmaWaitCompletion(dma);
+        ofs += ECC_CHECK_CHUNK_SIZE;
+    }
+
+    if (ofs < ofs_hwm) {
+#if ECC_CHECK_DEBUG
+        const uint32_t SR1 = FLASH->SR1;
+        const uint32_t SR2 = FLASH->SR2;
+#endif
+
+        // clear the fault
+        SCB->CFSR |= SCB_CFSR_PRECISERR_Msk;
+        SCB->CFSR |= SCB_CFSR_BFARVALID_Msk;
+        __enable_fault_irq();
+
+#if ECC_CHECK_DEBUG
+        // debug code for diagnosing errors
+        init_uarts();
+
+        while (true) {
+            usb_printf("ECC error! ofs=0x%08x SR1=0x%08x SR2=0x%08x\r\n", unsigned(ofs), unsigned(SR1), unsigned(SR2));
+            thread_sleep_ms(1000);
+        }
+#endif
+
+        // we must have ECC errors in flash, erase the pages
+        flash_set_keep_unlocked(true);
+        for (uint32_t i=0; i<num_pages_chk; i++) {
+            stm32_flash_erasepage(start_page+i);
+        }
+        flash_set_keep_unlocked(false);
+    }
+    dmaStreamFree(dma);
+    free(buf);
+
+    // clear any single or double bit ECC errors
+    FLASH->CCR1 |= FLASH_CCR_CLR_DBECCERR | FLASH_CCR_CLR_SNECCERR;
+#if BOARD_FLASH_SIZE > 1024
+    FLASH->CCR2 |= FLASH_CCR_CLR_DBECCERR | FLASH_CCR_CLR_SNECCERR;
+#endif
+}
+
+void check_ecc_errors(void)
+{
+    __disable_fault_irq();
+    // stm32_flash_corrupt(0x08000000 + (128*1024 * 14) + 72, false);
+
+    check_ecc_flash_region(flash_base_page, num_pages);
+
+#ifdef STORAGE_FLASH_START_PAGE
+    // now check the parameter storage area if its in flash
+    check_ecc_flash_region(STORAGE_FLASH_START_PAGE, 2);
+#endif
+
+    __enable_fault_irq();
+}
+#endif // AP_FLASH_ECC_CHECK_ENABLED

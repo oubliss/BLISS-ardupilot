@@ -30,6 +30,12 @@
 #include "hal.h"
 #include <hrt.h>
 
+// we rely on systimestamp_t for 64 bit timestamps
+static_assert(sizeof(uint64_t) == sizeof(systimestamp_t), "unexpected systimestamp_t size");
+
+#define STR(x) #x
+#define XSTR(x) STR(x)
+
 #if CH_CFG_ST_RESOLUTION == 16
 static_assert(sizeof(systime_t) == 2, "expected 16 bit systime_t");
 #elif CH_CFG_ST_RESOLUTION == 32
@@ -39,9 +45,9 @@ static_assert(sizeof(systime_t) == sizeof(sysinterval_t), "expected systime_t sa
 
 #if defined(HAL_EXPECTED_SYSCLOCK)
 #ifdef STM32_SYS_CK
-static_assert(HAL_EXPECTED_SYSCLOCK == STM32_SYS_CK, "unexpected STM32_SYS_CK value");
+static_assert(HAL_EXPECTED_SYSCLOCK == STM32_SYS_CK, "unexpected STM32_SYS_CK value got " XSTR(STM32_HCLK) " expected " XSTR(HAL_EXPECTED_SYSCLOCK));
 #elif defined(STM32_HCLK)
-static_assert(HAL_EXPECTED_SYSCLOCK == STM32_HCLK, "unexpected STM32_HCLK value");
+static_assert(HAL_EXPECTED_SYSCLOCK == STM32_HCLK, "unexpected STM32_HCLK value got " XSTR(STM32_HCLK) " expected " XSTR(HAL_EXPECTED_SYSCLOCK));
 #else
 #error "unknown system clock"
 #endif
@@ -324,16 +330,14 @@ void panic(const char *errormsg, ...)
     INTERNAL_ERROR(AP_InternalError::error_t::panic);
     va_list ap;
 
-    va_start(ap, errormsg);
-    vprintf(errormsg, ap);
-    va_end(ap);
-
-    hal.scheduler->delay_microseconds(10000);
+    uint16_t delay_ms = 10000;
     while (1) {
         va_start(ap, errormsg);
         vprintf(errormsg, ap);
         va_end(ap);
-        hal.scheduler->delay(500);
+        printf("\n");
+        hal.scheduler->delay(delay_ms);
+        delay_ms = 500;
     }
 #else
     // we don't support variable args in bootlaoder
@@ -385,7 +389,7 @@ __FASTRAMFUNC__ uint64_t micros64()
 
 __FASTRAMFUNC__ uint64_t millis64()
 {
-    return hrt_micros64() / 1000U;
+    return hrt_millis64();
 }
 
 

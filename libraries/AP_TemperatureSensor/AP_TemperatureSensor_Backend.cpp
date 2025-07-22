@@ -22,6 +22,18 @@
 #include <AP_BattMonitor/AP_BattMonitor.h>
 
 /*
+  All backends use the same parameter table and set of indices. Therefore, two
+  backends must not use the same index. The list of used indices and
+  corresponding backends is below.
+
+    1:   AP_TemperatureSensor_DroneCAN.cpp, note there is a clash with analog, but due to different param types we get away with it
+    1-7: AP_TemperatureSensor_Analog.cpp
+    8-9: AP_TemperatureSensor_MAX31865.cpp
+
+  Usage does not need to be contiguous. The maximum possible index is 63.
+*/
+
+/*
     base class constructor.
     This incorporates initialisation as well.
 */
@@ -40,8 +52,14 @@ bool AP_TemperatureSensor_Backend::healthy(void) const
     return (_state.last_time_ms > 0) && (AP_HAL::millis() - _state.last_time_ms < 5000);
 }
 
+#if HAL_LOGGING_ENABLED
 void AP_TemperatureSensor_Backend::Log_Write_TEMP() const
 {
+    // @LoggerMessage: TEMP
+    // @Description: Temperature Sensor Data
+    // @Field: TimeUS: Time since system startup
+    // @Field: Instance: temperature sensor instance
+    // @Field: Temp: temperature
     AP::logger().Write("TEMP",
             "TimeUS,"     "Instance,"       "Temp" , // labels
             "s"               "#"           "O"    , // units
@@ -49,6 +67,7 @@ void AP_TemperatureSensor_Backend::Log_Write_TEMP() const
             "Q"               "B"           "f"    , // types
      AP_HAL::micros64(), _state.instance, _state.temperature);
 }
+#endif
 
 void AP_TemperatureSensor_Backend::set_temperature(const float temperature)
 {
@@ -88,6 +107,9 @@ void AP_TemperatureSensor_Backend::update_external_libraries(const float tempera
             AP::battery().set_temperature_by_serial_number(temperature, _params.source_id);
             break;
 #endif
+        case AP_TemperatureSensor_Params::Source::DroneCAN:
+            // Label only, used by AP_Periph
+            break;
 
         case AP_TemperatureSensor_Params::Source::None:
         case AP_TemperatureSensor_Params::Source::Pitot_tube:

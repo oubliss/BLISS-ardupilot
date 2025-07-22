@@ -2,13 +2,6 @@
 
 #include "qautotune.h"
 
-/*****************************************************************************
-*   The init_ardupilot function processes everything we need for an in - air restart
-*        We will determine later if we are actually on the ground and process a
-*        ground start in that case.
-*
-*****************************************************************************/
-
 static void failsafe_check_static()
 {
     plane.failsafe_check();
@@ -17,26 +10,15 @@ static void failsafe_check_static()
 void Plane::init_ardupilot()
 {
 
-#if STATS_ENABLED == ENABLED
-    // initialise stats module
-    g2.stats.init();
-#endif
-
     ins.set_log_raw_bit(MASK_LOG_IMU_RAW);
-
-    // setup any board specific drivers
-    BoardConfig.init();
-
-#if HAL_MAX_CAN_PROTOCOL_DRIVERS
-    can_mgr.init();
-#endif
 
     rollController.convert_pid();
     pitchController.convert_pid();
 
     // initialise rc channels including setting mode
+    // CONVERSION: Added for upgrade to ArduPlane 4.2, Sep 2021
 #if HAL_QUADPLANE_ENABLED
-    rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, (quadplane.enabled() && quadplane.option_is_set(QuadPlane::OPTION::AIRMODE_UNUSED) && (rc().find_channel_for_option(RC_Channel::AUX_FUNC::AIRMODE) == nullptr)) ? RC_Channel::AUX_FUNC::ARMDISARM_AIRMODE : RC_Channel::AUX_FUNC::ARMDISARM);
+    rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, (quadplane.enabled() && quadplane.option_is_set(QuadPlane::Option::AIRMODE_UNUSED) && (rc().find_channel_for_option(RC_Channel::AUX_FUNC::AIRMODE) == nullptr)) ? RC_Channel::AUX_FUNC::ARMDISARM_AIRMODE : RC_Channel::AUX_FUNC::ARMDISARM);
 #else
     rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, RC_Channel::AUX_FUNC::ARMDISARM);
 #endif
@@ -55,29 +37,25 @@ void Plane::init_ardupilot()
     // init baro
     barometer.init();
 
+#if AP_RANGEFINDER_ENABLED
     // initialise rangefinder
     rangefinder.set_log_rfnd_bit(MASK_LOG_SONAR);
     rangefinder.init(ROTATION_PITCH_270);
+#endif
 
     // initialise battery monitoring
     battery.init();
 
+#if AP_RSSI_ENABLED
     rssi.init();
-
-#if AP_RPM_ENABLED
-    rpm_sensor.init();
 #endif
 
     // setup telem slots with serial ports
     gcs().setup_uarts();
 
 
-#if OSD_ENABLED == ENABLED
+#if OSD_ENABLED
     osd.init();
-#endif
-
-#if LOGGING_ENABLED == ENABLED
-    log_init();
 #endif
 
     AP::compass().set_log_bit(MASK_LOG_COMPASS);
@@ -90,7 +68,7 @@ void Plane::init_ardupilot()
 
     // GPS Initialization
     gps.set_log_gps_bit(MASK_LOG_GPS);
-    gps.init(serial_manager);
+    gps.init();
 
     init_rc_in();               // sets up rc channels from radio
 
@@ -125,8 +103,41 @@ void Plane::init_ardupilot()
 #endif
 
     AP_Param::reload_defaults_file(true);
-    
-    startup_ground();
+
+    set_mode(mode_initializing, ModeReason::INITIALISED);
+
+#if (GROUND_START_DELAY > 0)
+    gcs().send_text(MAV_SEVERITY_NOTICE,"Ground start with delay");
+    delay(GROUND_START_DELAY * 1000);
+#else
+    gcs().send_text(MAV_SEVERITY_INFO,"Ground start");
+#endif
+
+    //INS ground start
+    //------------------------
+    //
+    startup_INS();
+
+    // Save the settings for in-air restart
+    // ------------------------------------
+    //save_EEPROM_groundstart();
+
+    // initialise mission library
+    mission.init();
+#if HAL_LOGGING_ENABLED
+    mission.set_log_start_mission_item_bit(MASK_LOG_CMD);
+#endif
+
+    // initialise AP_Logger library
+#if HAL_LOGGING_ENABLED
+    logger.setVehicle_Startup_Writer(
+        FUNCTOR_BIND(&plane, &Plane::Log_Write_Vehicle_Startup_Messages, void)
+        );
+#endif
+
+    // reset last heartbeat time, so we don't trigger failsafe on slow
+    // startup
+    gcs().sysid_mygcs_seen(AP_HAL::millis());
 
     // don't initialise aux rc output until after quadplane is setup as
     // that can change initial values of channels
@@ -135,6 +146,7 @@ void Plane::init_ardupilot()
     if (g2.oneshot_mask != 0) {
         hal.rcout->set_output_mode(g2.oneshot_mask, AP_HAL::RCOutput::MODE_PWM_ONESHOT);
     }
+    hal.rcout->set_dshot_esc_type(SRV_Channels::get_dshot_esc_type());
 
     set_mode_by_number((enum Mode::Number)g.initial_mode.get(), ModeReason::INITIALISED);
 
@@ -149,54 +161,17 @@ void Plane::init_ardupilot()
     }
 #endif
 
-// init cargo gripper
-#if AP_GRIPPER_ENABLED
-    g2.gripper.init();
+#if AC_PRECLAND_ENABLED
+    // scheduler table specifies 400Hz, but we can call it no faster
+    // than the scheduler loop rate:
+    g2.precland.init(MIN(400, scheduler.get_loop_rate_hz()));
 #endif
+
+#if AP_ICENGINE_ENABLED
+    g2.ice_control.init();
+#endif
+
 }
-
-//********************************************************************************
-//This function does all the calibrations, etc. that we need during a ground start
-//********************************************************************************
-void Plane::startup_ground(void)
-{
-    set_mode(mode_initializing, ModeReason::INITIALISED);
-
-#if (GROUND_START_DELAY > 0)
-    gcs().send_text(MAV_SEVERITY_NOTICE,"Ground start with delay");
-    delay(GROUND_START_DELAY * 1000);
-#else
-    gcs().send_text(MAV_SEVERITY_INFO,"Ground start");
-#endif
-
-    //INS ground start
-    //------------------------
-    //
-    startup_INS_ground();
-
-    // Save the settings for in-air restart
-    // ------------------------------------
-    //save_EEPROM_groundstart();
-
-    // initialise mission library
-    mission.init();
-
-    // initialise AP_Logger library
-#if LOGGING_ENABLED == ENABLED
-    logger.setVehicle_Startup_Writer(
-        FUNCTOR_BIND(&plane, &Plane::Log_Write_Vehicle_Startup_Messages, void)
-        );
-#endif
-
-#if AP_SCRIPTING_ENABLED
-    g2.scripting.init();
-#endif // AP_SCRIPTING_ENABLED
-
-    // reset last heartbeat time, so we don't trigger failsafe on slow
-    // startup
-    gcs().sysid_myggcs_seen(AP_HAL::millis());
-}
-
 
 #if AP_FENCE_ENABLED
 /*
@@ -257,7 +232,7 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
 
     if (control_mode == &new_mode) {
         // don't switch modes if we are already in the correct mode.
-        // only make happy noise if using a difent method to switch, this stops beeping for repeated change mode requests from GCS
+        // only make happy noise if using a different method to switch, this stops beeping for repeated change mode requests from GCS
         if ((reason != control_mode_reason) && (reason != ModeReason::INITIALISED)) {
             AP_Notify::events.user_mode_change = 1;
         }
@@ -266,7 +241,7 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
 
 #if HAL_QUADPLANE_ENABLED
     if (new_mode.is_vtol_mode() && !plane.quadplane.available()) {
-        // dont try and switch to a Q mode if quadplane is not enabled and initalized
+        // dont try and switch to a Q mode if quadplane is not enabled and initialized
         gcs().send_text(MAV_SEVERITY_INFO,"Q_ENABLE 0");
         // make sad noise
         if (reason != ModeReason::INITIALISED) {
@@ -341,7 +316,9 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
     old_mode.exit();
 
     // log and notify mode change
+#if HAL_LOGGING_ENABLED
     logger.Write_Mode(control_mode->mode_number(), control_mode_reason);
+#endif
     notify_mode(*control_mode);
     gcs().send_message(MSG_HEARTBEAT);
 
@@ -371,7 +348,7 @@ bool Plane::set_mode_by_number(const Mode::Number new_mode_number, const ModeRea
 
 void Plane::check_long_failsafe()
 {
-    const uint32_t gcs_last_seen_ms = gcs().sysid_myggcs_last_seen_time_ms();
+    const uint32_t gcs_last_seen_ms = gcs().sysid_mygcs_last_seen_time_ms();
     const uint32_t tnow = millis();
     // only act on changes
     // -------------------
@@ -400,7 +377,7 @@ void Plane::check_long_failsafe()
             failsafe_long_on_event(FAILSAFE_GCS, ModeReason::GCS_FAILSAFE);
         }
     } else {
-        uint32_t timeout_seconds = g.fs_timeout_long;
+        float timeout_seconds = g.fs_timeout_long;
         if (g.fs_action_short != FS_ACTION_SHORT_DISABLED) {
             // avoid dropping back into short timeout
             timeout_seconds = g.fs_timeout_short;
@@ -437,7 +414,7 @@ void Plane::check_short_failsafe()
 }
 
 
-void Plane::startup_INS_ground(void)
+void Plane::startup_INS(void)
 {
     if (ins.gyro_calibration_timing() != AP_InertialSensor::GYRO_CAL_NEVER) {
         gcs().send_text(MAV_SEVERITY_ALERT, "Beginning INS calibration. Do not move plane");
@@ -466,17 +443,15 @@ void Plane::notify_mode(const Mode& mode)
     notify.set_flight_mode_str(mode.name4());
 }
 
+#if HAL_LOGGING_ENABLED
 /*
   should we log a message type now?
  */
 bool Plane::should_log(uint32_t mask)
 {
-#if LOGGING_ENABLED == ENABLED
     return logger.should_log(mask);
-#else
-    return false;
-#endif
 }
+#endif
 
 /*
   return throttle percentage from 0 to 100 for normal use and -100 to 100 when using reverse thrust

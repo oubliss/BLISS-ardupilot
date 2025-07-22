@@ -16,6 +16,11 @@
   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
+#include "GCS_config.h"
+#include <AP_Mission/AP_Mission_config.h>
+
+#if HAL_GCS_ENABLED && AP_MISSION_ENABLED
+
 #include "MissionItemProtocol_Waypoints.h"
 
 #include <AP_Logger/AP_Logger.h>
@@ -53,49 +58,35 @@ bool MissionItemProtocol_Waypoints::clear_all_items()
 MAV_MISSION_RESULT MissionItemProtocol_Waypoints::complete(const GCS_MAVLINK &_link)
 {
     _link.send_text(MAV_SEVERITY_INFO, "Flight plan received");
+#if HAL_LOGGING_ENABLED
     AP::logger().Write_EntireMission();
+#endif
     return MAV_MISSION_ACCEPTED;
 }
 
-MAV_MISSION_RESULT MissionItemProtocol_Waypoints::get_item(const GCS_MAVLINK &_link,
-                                                           const mavlink_message_t &msg,
-                                                           const mavlink_mission_request_int_t &packet,
-                                                           mavlink_mission_item_int_t &ret_packet)
+MAV_MISSION_RESULT MissionItemProtocol_Waypoints::get_item(uint16_t seq, mavlink_mission_item_int_t &ret_packet)
 {
-    if (packet.seq != 0 && // always allow HOME to be read
-        packet.seq >= mission.num_commands()) {
-        // try to educate the GCS on the actual size of the mission:
-        const mavlink_channel_t chan = _link.get_chan();
-        if (HAVE_PAYLOAD_SPACE(chan, MISSION_COUNT)) {
-            mavlink_msg_mission_count_send(chan,
-                                           msg.sysid,
-                                           msg.compid,
-                                           mission.num_commands(),
-                                           MAV_MISSION_TYPE_MISSION);
-        }
-        return MAV_MISSION_ERROR;
+    if (seq != 0 && // always allow HOME to be read
+        seq >= mission.num_commands()) {
+        return MAV_MISSION_INVALID_SEQUENCE;
     }
 
     AP_Mission::Mission_Command cmd;
 
     // retrieve mission from eeprom
-    if (!mission.read_cmd_from_storage(packet.seq, cmd)) {
+    if (!mission.read_cmd_from_storage(seq, cmd)) {
         return MAV_MISSION_ERROR;
     }
 
     if (!AP_Mission::mission_cmd_to_mavlink_int(cmd, ret_packet)) {
         return MAV_MISSION_ERROR;
     }
+    ret_packet.mission_type = MAV_MISSION_TYPE_MISSION;
 
     // set packet's current field to 1 if this is the command being executed
     if (cmd.id == (uint16_t)mission.get_current_nav_cmd().index) {
         ret_packet.current = 1;
-    } else {
-        ret_packet.current = 0;
     }
-
-    // set auto continue to 1
-    ret_packet.autocontinue = 1;     // 1 (true), 0 (false)
 
     return MAV_MISSION_ACCEPTED;
 }
@@ -139,3 +130,5 @@ void MissionItemProtocol_Waypoints::truncate(const mavlink_mission_count_t &pack
     // new mission arriving, truncate mission to be the same length
     mission.truncate(packet.count);
 }
+
+#endif  // HAL_GCS_ENABLED && AP_MISSION_ENABLED

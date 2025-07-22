@@ -35,9 +35,13 @@
 #include <AP_InternalError/AP_InternalError.h>
 #include <AP_Filesystem/AP_Filesystem.h>
 #include <stdio.h>
+#include <AP_ROMFS/AP_ROMFS.h>
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     #include <SITL/SITL.h>
 #endif
+
+#include "AP_Param_config.h"
 
 extern const AP_HAL::HAL &hal;
 
@@ -45,6 +49,15 @@ uint16_t AP_Param::sentinal_offset;
 
 // singleton instance
 AP_Param *AP_Param::_singleton;
+
+#ifndef AP_PARAM_STORAGE_BAK_ENABLED
+// we only have a storage region for backup storage if we have at
+// least 32768 bytes or storage. We also don't enable when using flash
+// storage as this can lead to loss of storage when updating to a
+// larger storage size
+#define AP_PARAM_STORAGE_BAK_ENABLED (HAL_STORAGE_SIZE>=32768) && !defined(STORAGE_FLASH_PAGE)
+#endif
+
 
 #define ENABLE_DEBUG 0
 
@@ -99,8 +112,13 @@ uint16_t AP_Param::param_overrides_len;
 uint16_t AP_Param::num_param_overrides;
 uint16_t AP_Param::num_read_only;
 
+// goes true if we run out of param space
+bool AP_Param::eeprom_full;
+
 ObjectBuffer_TS<AP_Param::param_save> AP_Param::save_queue{30};
 bool AP_Param::registered_save_handler;
+
+bool AP_Param::done_all_default_params;
 
 AP_Param::defaults_list *AP_Param::default_list;
 
@@ -124,8 +142,10 @@ const AP_Param::param_defaults_struct AP_Param::param_defaults_data = {
 // storage object
 StorageAccess AP_Param::_storage(StorageManager::StorageParam);
 
+#if AP_PARAM_STORAGE_BAK_ENABLED
 // backup storage object
 StorageAccess AP_Param::_storage_bak(StorageManager::StorageParamBak);
+#endif
 
 // flags indicating frame type
 uint16_t AP_Param::_frame_type_flags;
@@ -134,7 +154,9 @@ uint16_t AP_Param::_frame_type_flags;
 void AP_Param::eeprom_write_check(const void *ptr, uint16_t ofs, uint8_t size)
 {
     _storage.write_block(ofs, ptr, size);
+#if AP_PARAM_STORAGE_BAK_ENABLED
     _storage_bak.write_block(ofs, ptr, size);
+#endif
 }
 
 bool AP_Param::_hide_disabled_groups = true;
@@ -246,7 +268,12 @@ void AP_Param::check_group_info(const struct AP_Param::GroupInfo *  group_info,
         if (size == 0) {
             FATAL("invalid type in %s", group_info[i].name);
         }
-        if (prefix_length + strlen(group_info[i].name) > 16) {
+        uint8_t param_name_length = prefix_length + strlen(group_info[i].name);
+        if (type == AP_PARAM_VECTOR3F) {
+            // need room for _X/_Y/_Z
+            param_name_length += 2;
+        }
+        if (param_name_length > 16) {
             FATAL("suffix is too long in %s", group_info[i].name);
         }
         (*total_size) += size + sizeof(struct Param_header);
@@ -333,14 +360,19 @@ void AP_Param::check_var_info(void)
 bool AP_Param::setup(void)
 {
     struct EEPROM_header hdr {};
-    struct EEPROM_header hdr2 {};
 
     // check the header
     _storage.read_block(&hdr, 0, sizeof(hdr));
+
+#if AP_PARAM_STORAGE_BAK_ENABLED
+    struct EEPROM_header hdr2 {};
     _storage_bak.read_block(&hdr2, 0, sizeof(hdr2));
+#endif
+
     if (hdr.magic[0] != k_EEPROM_magic0 ||
         hdr.magic[1] != k_EEPROM_magic1 ||
         hdr.revision != k_EEPROM_revision) {
+#if AP_PARAM_STORAGE_BAK_ENABLED
         if (hdr2.magic[0] == k_EEPROM_magic0 &&
             hdr2.magic[1] == k_EEPROM_magic1 &&
             hdr2.revision == k_EEPROM_revision &&
@@ -349,14 +381,17 @@ bool AP_Param::setup(void)
             INTERNAL_ERROR(AP_InternalError::error_t::params_restored);
             return true;
         }
+#endif // AP_PARAM_STORAGE_BAK_ENABLED
         // header doesn't match. We can't recover any variables. Wipe
         // the header and setup the sentinal directly after the header
         Debug("bad header in setup - erasing");
         erase_all();
     }
 
+#if AP_PARAM_STORAGE_BAK_ENABLED
     // ensure that backup is in sync with primary
     _storage_bak.copy_area(_storage);
+#endif
 
     return true;
 }
@@ -942,19 +977,23 @@ AP_Param::find_by_index(uint16_t idx, enum ap_var_type *ptype, ParamToken *token
 AP_Param* AP_Param::find_by_name(const char* name, enum ap_var_type *ptype, ParamToken *token)
 {
     AP_Param *ap;
-    uint16_t count = 0;
     for (ap = AP_Param::first(token, ptype);
          ap && *ptype != AP_PARAM_GROUP && *ptype != AP_PARAM_NONE;
          ap = AP_Param::next_scalar(token, ptype)) {
-        int32_t ret = strncasecmp(name, var_info(token->key).name, AP_MAX_NAME_SIZE);
-        if (ret >= 0) {
+        const auto nlen = strlen(var_info(token->key).name);
+        /*
+          the name must either match the token name (if a non-group top level param)
+          or match up to the length (if a group).
+          This check avoids us traversing down into most groups, saving a lot of calls to copy_name_token()
+         */
+        int32_t ret = strncasecmp(name, var_info(token->key).name, nlen);
+        if (ret == 0) {
             char buf[AP_MAX_NAME_SIZE];
             ap->copy_name_token(*token, buf, AP_MAX_NAME_SIZE);
             if (strncasecmp(name, buf, AP_MAX_NAME_SIZE) == 0) {
                 break;
             }
         }
-        count++;
     }
     return ap;
 }
@@ -1167,6 +1206,8 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
         return;
     }
     if (ofs == (uint16_t) ~0) {
+        eeprom_full = true;
+        DEV_PRINTF("EEPROM full\n");
         return;
     }
 
@@ -1199,6 +1240,7 @@ void AP_Param::save_sync(bool force_save, bool send_to_gcs)
 
     if (ofs+type_size((enum ap_var_type)phdr.type)+2*sizeof(phdr) >= _storage.size()) {
         // we are out of room for saving variables
+        eeprom_full = true;
         DEV_PRINTF("EEPROM full\n");
         return;
     }
@@ -1235,6 +1277,7 @@ void AP_Param::save(bool force_save)
         if (hal.util->get_soft_armed() && hal.scheduler->in_main_thread()) {
             // if we are armed in main thread then don't sleep, instead we lose the
             // parameter save
+            INTERNAL_ERROR(AP_InternalError::error_t::flow_of_control);
             return;
         }
         // when we are disarmed then loop waiting for a slot to become
@@ -1328,8 +1371,7 @@ bool AP_Param::load(void)
         return false;
     }
 
-    AP_Param *ap;
-    ap = this;
+    AP_Param *ap = this;
     if (idx != 0) {
         ap = (AP_Param *)((ptrdiff_t)ap) - (idx*sizeof(float));
     }
@@ -1410,6 +1452,32 @@ bool AP_Param::is_read_only(void) const
         return read_only;
     }
     return false;
+}
+
+// returns true if this parameter should be settable via the
+// MAVLink interface:
+bool AP_Param::allow_set_via_mavlink(uint16_t flags) const
+{
+    if (is_read_only()) {
+        return false;
+    }
+
+    if (flags & AP_PARAM_FLAG_INTERNAL_USE_ONLY) {
+        // the user can set BRD_OPTIONS to enable set of internal
+        // parameters, for developer testing or unusual use cases
+        if (!AP_BoardConfig::allow_set_internal_parameters()) {
+            return false;
+        }
+    }
+
+#if HAL_GCS_ENABLED
+    // check the MAVLink library is OK with the concept:
+    if (!gcs().get_allow_param_set()) {
+        return false;
+    }
+#endif  // HAL_GCS_ENABLED
+
+    return true;
 }
 
 // set a AP_Param variable to a specified value
@@ -1543,32 +1611,75 @@ bool AP_Param::load_all()
  */
 void AP_Param::reload_defaults_file(bool last_pass)
 {
-#if AP_PARAM_MAX_EMBEDDED_PARAM > 0
-    if (param_defaults_data.length != 0) {
-        load_embedded_param_defaults(last_pass);
-        return;
-    }
-#endif
+#if AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED
 
-#if AP_FILESYSTEM_POSIX_ENABLED
     /*
       if the HAL specifies a defaults parameter file then override
       defaults using that file
      */
     const char *default_file = hal.util->get_custom_defaults_file();
     if (default_file) {
-        if (load_defaults_file(default_file, last_pass)) {
-            printf("Loaded defaults from %s\n", default_file);
-        } else {
-            AP_HAL::panic("Failed to load defaults from %s\n", default_file);
-        }
+#if AP_FILESYSTEM_FILE_READING_ENABLED
+        load_defaults_file_from_filesystem(default_file, last_pass);
+#elif defined(HAL_HAVE_AP_ROMFS_EMBEDDED_H)
+        load_defaults_file_from_romfs(default_file, last_pass);
+#endif
+    }
+
+#endif  // AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED
+
+#if AP_PARAM_MAX_EMBEDDED_PARAM > 0
+    if (param_defaults_data.length != 0) {
+        load_embedded_param_defaults(last_pass);
     }
 #endif
+
 #if CONFIG_HAL_BOARD == HAL_BOARD_SITL && !defined(HAL_BUILD_AP_PERIPH)
     hal.util->set_cmdline_parameters();
 #endif
 }
 
+#if AP_FILESYSTEM_FILE_READING_ENABLED
+void AP_Param::load_defaults_file_from_filesystem(const char *default_file, bool last_pass)
+{
+    if (load_defaults_file(default_file, last_pass)) {
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+        printf("Loaded defaults from %s\n", default_file);
+#endif
+    } else {
+#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+        AP_HAL::panic("Failed to load defaults from %s", default_file);
+#else
+        printf("Failed to load defaults from %s\n", default_file);
+#endif
+    }
+}
+#endif  // AP_FILESYSTEM_FILE_READING_ENABLED
+
+#if defined(HAL_HAVE_AP_ROMFS_EMBEDDED_H)
+void AP_Param::load_defaults_file_from_romfs(const char *default_file, bool last_pass)
+{
+    const char *prefix = "@ROMFS/";
+    if (strncmp(default_file, prefix, strlen(prefix)) != 0) {
+        // does not start with ROMFS, do not attempt to retrieve from it
+        return;
+    }
+
+    // filename without the prefix:
+    const char *trimmed_filename = &default_file[strlen(prefix)];
+
+    uint32_t string_length;
+    const uint8_t *text = AP_ROMFS::find_decompress(trimmed_filename, string_length);
+    if (text == nullptr) {
+        return;
+    }
+
+    load_param_defaults((const char*)text, string_length, last_pass);
+
+    AP_ROMFS::free(text);
+
+}
+#endif  // HAL_HAVE_AP_ROMFS_EMBEDDED_H
 
 /* 
    Load all variables from EEPROM for a particular object. This is
@@ -1619,6 +1730,13 @@ void AP_Param::load_object_from_eeprom(const void *object_pointer, const struct 
             }
             ofs += type_size((enum ap_var_type)phdr.type) + sizeof(phdr);
         }
+    }
+
+    if (!done_all_default_params) {
+        /*
+          the new subtree may need defaults from defaults.parm
+         */
+        reload_defaults_file(false);
     }
 
     // reset cached param counter as we may be loading a dynamic var_info
@@ -1875,7 +1993,6 @@ bool AP_Param::find_old_parameter(const struct ConversionInfo *info, AP_Param *v
     return true;
 }
 
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat"
 // convert one old vehicle parameter to new object parameter
@@ -1893,8 +2010,7 @@ void AP_Param::convert_old_parameter(const struct ConversionInfo *info, float sc
 
     // find the new variable in the variable structures
     enum ap_var_type ptype;
-    AP_Param *ap2;
-    ap2 = find(&info->new_name[0], &ptype);
+    AP_Param *ap2 = find(&info->new_name[0], &ptype);
     if (ap2 == nullptr) {
         DEV_PRINTF("Unknown conversion '%s'\n", info->new_name);
         return;
@@ -1936,11 +2052,17 @@ void AP_Param::convert_old_parameter(const struct ConversionInfo *info, float sc
 #pragma GCC diagnostic pop
 
 
-// convert old vehicle parameters to new object parametersv
+// convert old vehicle parameters to new object parameters
 void AP_Param::convert_old_parameters(const struct ConversionInfo *conversion_table, uint8_t table_size, uint8_t flags)
 {
+    convert_old_parameters_scaled(conversion_table, table_size, 1.0f, flags);
+}
+
+// convert old vehicle parameters to new object parameters with scaling - assumes all parameters will have the same scaling factor
+void AP_Param::convert_old_parameters_scaled(const struct ConversionInfo *conversion_table, uint8_t table_size, float scaler, uint8_t flags)
+{
     for (uint8_t i=0; i<table_size; i++) {
-        convert_old_parameter(&conversion_table[i], 1.0f, flags);
+        convert_old_parameter(&conversion_table[i], scaler, flags);
     }
     // we need to flush here to prevent a later set_default_by_name()
     // causing a save to be done on a converted parameter
@@ -1951,7 +2073,7 @@ void AP_Param::convert_old_parameters(const struct ConversionInfo *conversion_ta
 // is_top_level: Is true if the class had its own top level key, param_key. It is false if the class was a subgroup
 void AP_Param::convert_class(uint16_t param_key, void *object_pointer,
                                     const struct AP_Param::GroupInfo *group_info,
-                                    uint16_t old_index, uint16_t old_top_element, bool is_top_level)
+                                    uint16_t old_index, bool is_top_level, bool recurse_sub_groups)
 {
     const uint8_t group_shift = is_top_level ? 0 : 6;
 
@@ -1965,6 +2087,15 @@ void AP_Param::convert_class(uint16_t param_key, void *object_pointer,
         if (group_shift != 0 && idx == 0) {
             // Note: Index 0 is treated as 63 for group bit shifting purposes. See group_id()
             idx = 63;
+        }
+
+        if (info.type == AP_PARAM_GROUP) {
+            // Convert subgroups if enabled
+            if (recurse_sub_groups) {
+                // Only recurse once
+                convert_class(param_key, (uint8_t *)object_pointer + group_info[i].offset, get_group_info(group_info[i]), idx, false, false);
+            }
+            continue;
         }
 
         info.old_group_element = (idx << group_shift) + old_index;
@@ -1992,11 +2123,34 @@ void AP_Param::convert_class(uint16_t param_key, void *object_pointer,
     flush();
 }
 
+// convert an object which was stored in a vehicle's G2 into a new
+// object in AP_Vehicle.cpp:
+void AP_Param::convert_g2_objects(const void *g2, const G2ObjectConversion g2_conversions[], uint8_t num_conversions)
+{
+    // Find G2's Top Level Key
+    ConversionInfo info;
+    if (!find_top_level_key_by_pointer(g2, info.old_key)) {
+        return;
+    }
+    for (uint8_t i=0; i<num_conversions; i++) {
+        const auto &c { g2_conversions[i] };
+        convert_class(info.old_key, c.object_pointer, c.var_info, c.old_index, false);
+    }
+}
+
+void AP_Param::convert_toplevel_objects(const TopLevelObjectConversion conversions[], uint8_t num_conversions)
+{
+    for (uint8_t i=0; i<num_conversions; i++) {
+        const auto &c { conversions[i] };
+        convert_class(c.old_index, c.object_pointer, c.var_info, 0, true);
+    }
+}
+
 /*
  convert width of a parameter, allowing update to wider scalar values
  without changing the parameter indexes
 */
-bool AP_Param::convert_parameter_width(ap_var_type old_ptype)
+bool AP_Param::_convert_parameter_width(ap_var_type old_ptype, float scale_factor, bool bitmask)
 {
     if (configured_in_storage()) {
         // already converted or set by the user
@@ -2040,17 +2194,52 @@ bool AP_Param::convert_parameter_width(ap_var_type old_ptype)
     
     AP_Param *old_ap = (AP_Param *)&old_value[0];
 
-    // going via float is safe as the only time we would be converting
-    // from AP_Int32 is when converting to float
-    float old_float_value = old_ap->cast_to_float(old_ptype);
-    set_value(new_ptype, this, old_float_value);
+    if (!bitmask) {
+        // Numeric conversion
+        // going via float is safe as the only time we would be converting
+        // from AP_Int32 is when converting to float
+        float old_float_value = old_ap->cast_to_float(old_ptype);
+        set_value(new_ptype, this, old_float_value*scale_factor);
+
+    } else {
+        // Bitmask conversion, go via uint32
+        // int8 -1 should convert to int16 255
+        uint32_t mask;
+        switch (old_ptype) {
+        case AP_PARAM_INT8:
+            mask = (uint8_t)(*(AP_Int8*)old_ap);
+            break;
+        case AP_PARAM_INT16:
+            mask = (uint16_t)(*(AP_Int16*)old_ap);
+            break;
+        case AP_PARAM_INT32:
+            mask = (uint32_t)(*(AP_Int32*)old_ap);
+            break;
+        default:
+            return false;
+        }
+
+        switch (new_ptype) {
+        case AP_PARAM_INT8:
+            ((AP_Int8 *)this)->set(mask);
+            break;
+        case AP_PARAM_INT16:
+            ((AP_Int16 *)this)->set(mask);
+            break;
+        case AP_PARAM_INT32:
+            ((AP_Int32 *)this)->set(mask);
+            break;
+        default:
+            return false;
+        }
+    }
+
 
     // force save as the new type
     save(true);
 
     return true;
 }
-
 
 /*
   set a parameter to a float value
@@ -2136,8 +2325,7 @@ bool AP_Param::parse_param_line(char *line, char **vname, float &value, bool &re
 }
 
 
-// FIXME: make this AP_FILESYSTEM_FILE_READING_ENABLED
-#if AP_FILESYSTEM_FATFS_ENABLED || AP_FILESYSTEM_POSIX_ENABLED
+#if AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED || AP_PARAM_DYNAMIC_ENABLED
 
 // increments num_defaults for each default found in filename
 bool AP_Param::count_defaults_in_file(const char *filename, uint16_t &num_defaults)
@@ -2179,6 +2367,7 @@ bool AP_Param::read_param_defaults_file(const char *filename, bool last_pass, ui
         return false;
     }
 
+    bool done_all = true;
     char line[100];
     while (AP::FS().fgets(line, sizeof(line)-1, file_apfs)) {
         char *pname;
@@ -2199,6 +2388,7 @@ bool AP_Param::read_param_defaults_file(const char *filename, bool last_pass, ui
                          pname, filename);
 #endif
             }
+            done_all = false;
             continue;
         }
         if (idx >= param_overrides_len) {
@@ -2217,6 +2407,8 @@ bool AP_Param::read_param_defaults_file(const char *filename, bool last_pass, ui
         }
     }
     AP::FS().close(file_apfs);
+
+    done_all_default_params = done_all;
 
     return true;
 }
@@ -2252,7 +2444,7 @@ bool AP_Param::load_defaults_file(const char *filename, bool last_pass)
     num_param_overrides = 0;
     num_read_only = 0;
 
-    param_overrides = new param_override[num_defaults];
+    param_overrides = NEW_NOTHROW param_override[num_defaults];
     if (param_overrides == nullptr) {
         AP_HAL::panic("AP_Param: Failed to allocate overrides");
         return false;
@@ -2283,17 +2475,14 @@ bool AP_Param::load_defaults_file(const char *filename, bool last_pass)
 
     return true;
 }
+#endif // AP_PARAM_DEFAULTS_FILE_PARSING_ENABLED
 
-#endif // AP_FILESYSTEM_FATFS_ENABLED || AP_FILESYSTEM_POSIX_ENABLED
-
-#if AP_PARAM_MAX_EMBEDDED_PARAM > 0
+#if AP_PARAM_MAX_EMBEDDED_PARAM > 0 || defined(HAL_HAVE_AP_ROMFS_EMBEDDED_H)
 /*
-  count the number of embedded parameter defaults
+  count the number of parameter defaults present in supplied string
  */
-bool AP_Param::count_embedded_param_defaults(uint16_t &count)
+bool AP_Param::count_param_defaults(const volatile char *ptr, int32_t length, uint16_t &count)
 {
-    const volatile char *ptr = param_defaults_data.data;
-    int32_t length = param_defaults_data.length;
     count = 0;
     
     while (length>0) {
@@ -2335,11 +2524,9 @@ bool AP_Param::count_embedded_param_defaults(uint16_t &count)
 }
 
 /*
- * load a default set of parameters from a embedded parameter region
- * @last_pass: if this is the last pass on defaults - unknown parameters are
- *             ignored but if this is set a warning will be emitted
+ *  load parameter defaults from supplied string
  */
-void AP_Param::load_embedded_param_defaults(bool last_pass)
+void AP_Param::load_param_defaults(const volatile char *ptr, int32_t length, bool last_pass)
 {
     delete[] param_overrides;
     param_overrides = nullptr;
@@ -2348,11 +2535,11 @@ void AP_Param::load_embedded_param_defaults(bool last_pass)
     num_read_only = 0;
 
     uint16_t num_defaults = 0;
-    if (!count_embedded_param_defaults(num_defaults)) {
+    if (!count_param_defaults(ptr, length, num_defaults)) {
         return;
     }
 
-    param_overrides = new param_override[num_defaults];
+    param_overrides = NEW_NOTHROW param_override[num_defaults];
     if (param_overrides == nullptr) {
         AP_HAL::panic("AP_Param: Failed to allocate overrides");
         return;
@@ -2360,8 +2547,6 @@ void AP_Param::load_embedded_param_defaults(bool last_pass)
 
     param_overrides_len = num_defaults;
 
-    const volatile char *ptr = param_defaults_data.data;
-    int32_t length = param_defaults_data.length;
     uint16_t idx = 0;
     
     while (idx < num_defaults && length > 0) {
@@ -2395,7 +2580,7 @@ void AP_Param::load_embedded_param_defaults(bool last_pass)
         AP_Param *vp = find(pname, &var_type);
         if (!vp) {
             if (last_pass) {
-#if ENABLE_DEBUG
+#if ENABLE_DEBUG && (AP_PARAM_MAX_EMBEDDED_PARAM > 0)
                 ::printf("Ignored unknown param %s from embedded region (offset=%u)\n",
                          pname, unsigned(ptr - param_defaults_data.data));
                 hal.console->printf(
@@ -2418,7 +2603,21 @@ void AP_Param::load_embedded_param_defaults(bool last_pass)
     }
     num_param_overrides = num_defaults;
 }
-#endif // AP_PARAM_MAX_EMBEDDED_PARAM > 0
+#endif // AP_PARAM_MAX_EMBEDDED_PARAM > 0 || defined(HAL_HAVE_AP_ROMFS_EMBEDDED_H)
+
+
+#if AP_PARAM_MAX_EMBEDDED_PARAM > 0
+/*
+ * load a default set of parameters from a embedded parameter region
+ * @last_pass: if this is the last pass on defaults - unknown parameters are
+ *             ignored but if this is set a warning will be emitted
+ */
+void AP_Param::load_embedded_param_defaults(bool last_pass)
+{
+    load_param_defaults(param_defaults_data.data, param_defaults_data.length, last_pass);
+}
+#endif  // AP_PARAM_MAX_EMBEDDED_PARAM > 0
+
 
 /* 
    find a default value given a pointer to a default value in flash
@@ -2736,7 +2935,7 @@ void AP_Param::add_default(AP_Param *ap, float v)
     }
 
     // add to list
-    defaults_list *new_item = new defaults_list;
+    defaults_list *new_item = NEW_NOTHROW defaults_list;
     if (new_item == nullptr) {
         return;
     }
@@ -2792,14 +2991,14 @@ void AP_Param::show_all(AP_HAL::BetterStream *port, bool showKeyValues)
     ParamToken token;
     AP_Param *ap;
     enum ap_var_type type;
-    float default_value = nanf("0x4152");  // from logger quiet_nanf
+    float default_value = NaNf;  // from logger quiet_nanf
 
     for (ap=AP_Param::first(&token, &type, &default_value);
          ap;
          ap=AP_Param::next_scalar(&token, &type, &default_value)) {
         if (showKeyValues) {
             ::printf("Key %u: Index %u: GroupElement %u : Default %f  :", (unsigned)var_info(token.key).key, (unsigned)token.idx, (unsigned)token.group_element, default_value);
-            default_value = nanf("0x4152");
+            default_value = NaNf;
         }
         show(ap, token, type, port);
         hal.scheduler->delay(1);
@@ -2999,8 +3198,13 @@ bool AP_Param::load_int32(uint16_t key, uint32_t group_element, int32_t &value)
  */
 bool AP_Param::add_param(uint8_t _key, uint8_t param_num, const char *pname, float default_value)
 {
+    if (_var_info_dynamic == nullptr) {
+        // No dynamic tables available
+        return false;
+    }
+
     // check for valid values
-    if (param_num == 0 || param_num > 63 || strlen(pname) > 16) {
+    if (param_num == 0 || param_num > 63 || strlen(pname) > AP_MAX_NAME_SIZE) {
         return false;
     }
 
@@ -3037,6 +3241,26 @@ bool AP_Param::add_param(uint8_t _key, uint8_t param_num, const char *pname, flo
         return false;
     }
 
+    // Check length
+    char fullName[AP_MAX_NAME_SIZE+1] = {};
+    const int fullNameLength = hal.util->snprintf(fullName, sizeof(fullName), "%s%s", info.name, pname);
+    if ((fullNameLength < 0) || (fullNameLength > AP_MAX_NAME_SIZE)) {
+        // Param is too long with table prefix (or snprintf failed)
+        return false;
+    }
+
+    // Get param object
+    AP_Float *pvalues = const_cast<AP_Float *>((const AP_Float *)info.ptr);
+    AP_Float &p = pvalues[param_num];
+
+    // Check for conflicting name
+    enum ap_var_type existingType;
+    AP_Param* existingParam = find(fullName, &existingType);
+    if ((existingParam != nullptr) && ((existingType != AP_PARAM_FLOAT) || ((AP_Float*)existingParam != &p))) {
+        // There is a existing parameter with this name (which is not this parameter from a previous script run)
+        return false;
+    }
+
     // fill in idx of any gaps, leaving them hidden, this allows
     // scripts to remove parameters
     for (uint8_t j=1; j<param_num; j++) {
@@ -3068,8 +3292,6 @@ bool AP_Param::add_param(uint8_t _key, uint8_t param_num, const char *pname, flo
     invalidate_count();
 
     // load from storage if available
-    AP_Float *pvalues = const_cast<AP_Float *>((const AP_Float *)info.ptr);
-    AP_Float &p = pvalues[param_num];
     p.set_default(default_value);
     p.load();
 

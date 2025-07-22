@@ -16,8 +16,8 @@ define SMPS_PWR
 # crystal frequency
 OSCILLATOR_HZ 25000000
 
-# board ID for firmware load
-APJ_BOARD_ID 146
+# board ID. See Tools/AP_Bootloader/board_types.txt
+APJ_BOARD_ID AP_HW_H757I_EVAL
 
 FLASH_SIZE_KB 2048
 
@@ -71,5 +71,4 @@ QSPIDEV       mt25q       QUADSPI1      MODE1       120*MHZ      24            8
 PB13 VBUS INPUT OPENDRAIN
 
 
-define CAN_APP_NODE_NAME "org.cubepilot.H757"
 define BOOTLOADER_DEBUG SD1

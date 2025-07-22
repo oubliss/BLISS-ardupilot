@@ -7,22 +7,21 @@ static enum AutoSurfaceState auto_surface_state = AUTO_SURFACE_STATE_GO_TO_LOCAT
 // start_command - this function will be called when the ap_mission lib wishes to start a new command
 bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 {
-    // To-Do: logging when new commands start/end
-    if (should_log(MASK_LOG_CMD)) {
-        logger.Write_Mission_Cmd(mission, cmd);
-    }
-
     const Location &target_loc = cmd.content.location;
+    auto alt_frame = target_loc.get_alt_frame();
 
-    // target alt must be negative (underwater)
-    if (target_loc.alt > 0.0f) {
-        gcs().send_text(MAV_SEVERITY_WARNING, "BAD NAV ALT %0.2f", (double)target_loc.alt);
-        return false;
-    }
-
-    // only tested/supported alt frame so far is AltFrame::ABOVE_HOME, where Home alt is always water's surface ie zero depth
-    if (target_loc.get_alt_frame() != Location::AltFrame::ABOVE_HOME) {
-        gcs().send_text(MAV_SEVERITY_WARNING, "BAD NAV AltFrame %d", (int8_t)target_loc.get_alt_frame());
+    if (alt_frame == Location::AltFrame::ABOVE_HOME) {
+        if (target_loc.alt > 0) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Alt above home must be negative");
+            return false;
+        }
+    } else if (alt_frame == Location::AltFrame::ABOVE_TERRAIN) {
+        if (target_loc.alt < 0) {
+            gcs().send_text(MAV_SEVERITY_WARNING, "Alt above terrain must be positive");
+            return false;
+        }
+    } else {
+        gcs().send_text(MAV_SEVERITY_WARNING, "Bad alt frame");
         return false;
     }
 
@@ -55,7 +54,7 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         do_loiter_time(cmd);
         break;
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
     case MAV_CMD_NAV_GUIDED_ENABLE:             // 92  accept navigation commands from external nav computer
         do_nav_guided_enable(cmd);
         break;
@@ -91,8 +90,11 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         do_set_home(cmd);
         break;
 
+    case MAV_CMD_DO_SET_ROI_LOCATION:       // 195
+    case MAV_CMD_DO_SET_ROI_NONE:           // 197
     case MAV_CMD_DO_SET_ROI:                // 201
         // point the vehicle and camera at a region of interest (ROI)
+        // ROI_NONE can be handled by the regular ROI handler because lat, lon, alt are always zero
         do_roi(cmd);
         break;
 
@@ -101,7 +103,7 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
         do_mount_control(cmd);
         break;
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
     case MAV_CMD_DO_GUIDED_LIMITS:                      // 222  accept guided mode limits
         do_guided_limits(cmd);
         break;
@@ -109,6 +111,7 @@ bool Sub::start_command(const AP_Mission::Mission_Command& cmd)
 
     default:
         // unable to use the command, allow the vehicle to try the next command
+        gcs().send_text(MAV_SEVERITY_WARNING, "Ignoring command %d", cmd.id);
         return false;
     }
 
@@ -163,7 +166,7 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
     case MAV_CMD_NAV_LOITER_TIME:
         return verify_loiter_time();
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
     case MAV_CMD_NAV_GUIDED_ENABLE:
         return verify_nav_guided_enable(cmd);
 #endif
@@ -186,6 +189,8 @@ bool Sub::verify_command(const AP_Mission::Mission_Command& cmd)
         // do commands (always return true)
     case MAV_CMD_DO_CHANGE_SPEED:
     case MAV_CMD_DO_SET_HOME:
+    case MAV_CMD_DO_SET_ROI_LOCATION:
+    case MAV_CMD_DO_SET_ROI_NONE:
     case MAV_CMD_DO_SET_ROI:
     case MAV_CMD_DO_MOUNT_CONTROL:
     case MAV_CMD_DO_SET_CAM_TRIGG_DIST:
@@ -233,7 +238,7 @@ void Sub::do_nav_wp(const AP_Mission::Mission_Command& cmd)
             target_loc.set_alt_cm(curr_alt, target_loc.get_alt_frame());
         } else {
             // default to current altitude as alt-above-home
-            target_loc.set_alt_cm(current_loc.alt, current_loc.get_alt_frame());
+            target_loc.copy_alt_from(current_loc);
         }
     }
 
@@ -298,7 +303,7 @@ void Sub::do_loiter_unlimited(const AP_Mission::Mission_Command& cmd)
     if (target_loc.lat == 0 && target_loc.lng == 0) {
         // To-Do: make this simpler
         Vector3f temp_pos;
-        wp_nav.get_wp_stopping_point_xy(temp_pos.xy());
+        wp_nav.get_wp_stopping_point_NE_cm(temp_pos.xy());
         const Location temp_loc(temp_pos, Location::AltFrame::ABOVE_ORIGIN);
         target_loc.lat = temp_loc.lat;
         target_loc.lng = temp_loc.lng;
@@ -318,7 +323,7 @@ void Sub::do_loiter_unlimited(const AP_Mission::Mission_Command& cmd)
             target_loc.set_alt_cm(curr_alt, target_loc.get_alt_frame());
         } else {
             // default to current altitude as alt-above-home
-            target_loc.set_alt_cm(current_loc.alt, current_loc.get_alt_frame());
+            target_loc.copy_alt_from(current_loc);
         }
     }
 
@@ -339,15 +344,15 @@ void Sub::do_circle(const AP_Mission::Mission_Command& cmd)
     }
 
     // default target altitude to current altitude if not provided
-    if (circle_center.alt == 0) {
+    if (circle_center.alt_is_zero()) {
         int32_t curr_alt;
         if (current_loc.get_alt_cm(circle_center.get_alt_frame(),curr_alt)) {
             // circle altitude uses frame from command
             circle_center.set_alt_cm(curr_alt,circle_center.get_alt_frame());
         } else {
             // default to current altitude above origin
-            circle_center.set_alt_cm(current_loc.alt, current_loc.get_alt_frame());
-            AP::logger().Write_Error(LogErrorSubsystem::TERRAIN, LogErrorCode::MISSING_TERRAIN_DATA);
+            circle_center.copy_alt_from(current_loc);
+            LOGGER_WRITE_ERROR(LogErrorSubsystem::TERRAIN, LogErrorCode::MISSING_TERRAIN_DATA);
         }
     }
 
@@ -377,7 +382,7 @@ void Sub::do_loiter_time(const AP_Mission::Mission_Command& cmd)
     loiter_time_max = cmd.p1;     // units are (seconds)
 }
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
 // do_nav_guided_enable - initiate accepting commands from external nav computer
 void Sub::do_nav_guided_enable(const AP_Mission::Mission_Command& cmd)
 {
@@ -401,12 +406,16 @@ void Sub::do_nav_delay(const AP_Mission::Mission_Command& cmd)
         nav_delay_time_max_ms = cmd.content.nav_delay.seconds * 1000; // convert seconds to milliseconds
     } else {
         // absolute delay to utc time
+#if AP_RTC_ENABLED
         nav_delay_time_max_ms = AP::rtc().get_time_utc(cmd.content.nav_delay.hour_utc, cmd.content.nav_delay.min_utc, cmd.content.nav_delay.sec_utc, 0);
+#else
+        nav_delay_time_max_ms = 0;
+#endif
     }
     gcs().send_text(MAV_SEVERITY_INFO, "Delaying %u sec", (unsigned)(nav_delay_time_max_ms/1000));
 }
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
 // do_guided_limits - pass guided limits to guided controller
 void Sub::do_guided_limits(const AP_Mission::Mission_Command& cmd)
 {
@@ -516,7 +525,7 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
     if (auto_mode == Auto_CircleMoveToEdge) {
         if (wp_nav.reached_wp_destination()) {
             Vector3f circle_center;
-            UNUSED_RESULT(cmd.content.location.get_vector_from_origin_NEU(circle_center));
+            UNUSED_RESULT(cmd.content.location.get_vector_from_origin_NEU_cm(circle_center));
 
             // set target altitude if not provided
             if (is_zero(circle_center.z)) {
@@ -533,12 +542,13 @@ bool Sub::verify_circle(const AP_Mission::Mission_Command& cmd)
         }
         return false;
     }
+    const float turns = cmd.get_loiter_turns();
 
     // check if we have completed circling
-    return fabsf(sub.circle_nav.get_angle_total()/M_2PI) >= LOWBYTE(cmd.p1);
+    return fabsf(sub.circle_nav.get_angle_total_rad()/M_2PI) >= turns;
 }
 
-#if NAV_GUIDED == ENABLED
+#if NAV_GUIDED
 // verify_nav_guided - check if we have breached any limits
 bool Sub::verify_nav_guided_enable(const AP_Mission::Mission_Command& cmd)
 {
@@ -574,7 +584,7 @@ void Sub::do_wait_delay(const AP_Mission::Mission_Command& cmd)
 
 void Sub::do_within_distance(const AP_Mission::Mission_Command& cmd)
 {
-    condition_value  = cmd.content.distance.meters * 100;
+    condition_value  = cmd.content.distance.meters;
 }
 
 void Sub::do_yaw(const AP_Mission::Mission_Command& cmd)
@@ -602,7 +612,7 @@ bool Sub::verify_wait_delay()
 
 bool Sub::verify_within_distance()
 {
-    if (wp_nav.get_wp_distance_to_destination() < (uint32_t)MAX(condition_value,0)) {
+    if (wp_nav.get_wp_distance_to_destination_cm() < (uint32_t)MAX(condition_value,0)) {
         condition_value = 0;
         return true;
     }
@@ -656,21 +666,19 @@ bool Sub::do_guided(const AP_Mission::Mission_Command& cmd)
 void Sub::do_change_speed(const AP_Mission::Mission_Command& cmd)
 {
     if (cmd.content.speed.target_ms > 0) {
-        wp_nav.set_speed_xy(cmd.content.speed.target_ms * 100.0f);
+        wp_nav.set_speed_NE_cms(cmd.content.speed.target_ms * 100.0f);
     }
 }
 
 void Sub::do_set_home(const AP_Mission::Mission_Command& cmd)
 {
-    if (cmd.p1 == 1 || (cmd.content.location.lat == 0 && cmd.content.location.lng == 0 && cmd.content.location.alt == 0)) {
+    if (cmd.p1 == 1 || !cmd.content.location.initialised()) {
         if (!set_home_to_current_location(false)) {
             // silently ignore this failure
         }
     } else {
-        if (!far_from_EKF_origin(cmd.content.location)) {
-            if (!set_home(cmd.content.location, false)) {
-                // silently ignore this failure
-            }
+        if (!set_home(cmd.content.location, false)) {
+            // silently ignore this failure
         }
     }
 }

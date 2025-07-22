@@ -22,11 +22,9 @@
 #include "OpticalFlow_Onboard.h"
 #include "RCInput.h"
 #include "RCInput_AioPRU.h"
-#include "RCInput_Navio2.h"
 #include "RCInput_PRU.h"
 #include "RCInput_RPI.h"
 #include "RCInput_SoloLink.h"
-#include "RCInput_UART.h"
 #include "RCInput_UDP.h"
 #include "RCInput_Multi.h"
 #include "RCInput_ZYNQ.h"
@@ -34,6 +32,7 @@
 #include "RCOutput_AioPRU.h"
 #include "RCOutput_Bebop.h"
 #include "RCOutput_Disco.h"
+#include "RCOutput_Multi.h"
 #include "RCOutput_PCA9685.h"
 #include "RCOutput_PRU.h"
 #include "RCOutput_Sysfs.h"
@@ -57,22 +56,25 @@ using namespace Linux;
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DARK || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR ||  \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1 || \
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_CANZERO || \
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PILOTPI
 static UtilRPI utilInstance;
 #else
 static Util utilInstance;
 #endif
 
-// 9 serial ports on Linux
-static UARTDriver uartADriver(true);
-static UARTDriver uartCDriver(false);
-static UARTDriver uartDDriver(false);
-static UARTDriver uartEDriver(false);
-static UARTDriver uartFDriver(false);
-static UARTDriver uartGDriver(false);
-static UARTDriver uartHDriver(false);
-static UARTDriver uartIDriver(false);
-static UARTDriver uartJDriver(false);
+// 10 serial ports on Linux
+static UARTDriver serial0Driver(true);
+static UARTDriver serial1Driver(false);
+static UARTDriver serial2Driver(false);
+// serial3Driver declared below depending on board type
+static UARTDriver serial4Driver(false);
+static UARTDriver serial5Driver(false);
+static UARTDriver serial6Driver(false);
+static UARTDriver serial7Driver(false);
+static UARTDriver serial8Driver(false);
+static UARTDriver serial9Driver(false);
 
 static I2CDeviceManager i2c_mgr_instance;
 static SPIDeviceManager spi_mgr_instance;
@@ -80,17 +82,32 @@ static SPIDeviceManager spi_mgr_instance;
 #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO2 || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH
-static SPIUARTDriver uartBDriver;
+static SPIUARTDriver serial3Driver;
 #else
-static UARTDriver uartBDriver(false);
+static UARTDriver serial3Driver(false);
 #endif
+
+static UARTDriver* serialDrivers[] = {
+    &serial0Driver,
+    &serial1Driver,
+    &serial2Driver,
+    &serial3Driver,
+    &serial4Driver,
+    &serial5Driver,
+    &serial6Driver,
+    &serial7Driver,
+    &serial8Driver,
+    &serial9Driver,
+};
 
 #if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBRAIN2 || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH || \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR|| \
-    ((CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1) && (OBAL_ALLOW_ADC ==1))
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR || \
+    ((CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1) && (OBAL_ALLOW_ADC ==1)) || \
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_CANZERO || \
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PILOTPI
 static AnalogIn_ADS1115 analogIn;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXF || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBOARD || \
@@ -110,30 +127,13 @@ static Storage storageDriver;
 /*
   use the BBB gpio driver on ERLE, PXF, BBBMINI, BLUE and PocketPilot
  */
-#if CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXF || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBOARD || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BBBMINI || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BLUE || \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_POCKET
+#if HAL_LINUX_GPIO_BBB_ENABLED
 static GPIO_BBB gpioDriver;
-/*
-  use the RPI gpio driver on Navio
- */
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBRAIN2 || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DARK || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1
-static GPIO_RPI gpioDriver;
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR
+#elif HAL_LINUX_GPIO_NAVIGATOR_ENABLED
 static GPIO_Navigator gpioDriver;
-#elif  CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO || \
-       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO2 || \
-       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_EDGE
-static GPIO_Sysfs gpioDriver;
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_AERO
+#elif HAL_LINUX_GPIO_RPI_ENABLED
+static GPIO_RPI gpioDriver;
+#elif HAL_LINUX_GPIO_SYSFS_ENABLED
 static GPIO_Sysfs gpioDriver;
 #else
 static Empty::GPIO gpioDriver;
@@ -148,13 +148,14 @@ static RCInput_PRU rcinDriver;
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_POCKET
 static RCInput_AioPRU rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BLUE
-static RCInput_Multi rcinDriver{2, new RCInput_AioPRU, new RCInput_RCProtocol(NULL, "/dev/ttyO4")};
+static RCInput_Multi rcinDriver{2, NEW_NOTHROW RCInput_AioPRU, NEW_NOTHROW RCInput_RCProtocol(NULL, "/dev/ttyO4")};
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBRAIN2 || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DARK || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1
+      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1 || \
+      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_CANZERO
 static RCInput_RPI rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ZYNQ || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OCPOC_ZYNQ
@@ -162,16 +163,17 @@ static RCInput_ZYNQ rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BEBOP
 static RCInput_UDP  rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DISCO
-static RCInput_Multi rcinDriver{2, new RCInput_RCProtocol("/dev/uart-sbus", "/dev/uart-sumd"), new RCInput_UDP()};
+static RCInput_Multi rcinDriver{2, NEW_NOTHROW RCInput_RCProtocol("/dev/uart-sbus", "/dev/uart-sumd"), NEW_NOTHROW RCInput_UDP()};
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_AERO
 static RCInput_SoloLink rcinDriver;
-#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO2 || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_EDGE
-static RCInput_Navio2 rcinDriver;
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_RST_ZYNQ
 static RCInput_RCProtocol rcinDriver{"/dev/ttyPS0", NULL};
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PILOTPI
+static RCInput_RCProtocol rcinDriver{"/dev/ttyAMA0", NULL};
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_VNAV || \
-      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR
+      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR || \
+      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO2 || \
+      CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_EDGE
 // this is needed to allow for RC input using SERIALn_PROTOCOL=23. No fd is opened
 // in the linux driver and instead user needs to provide a uart via SERIALn_PROTOCOL
 static RCInput_RCProtocol rcinDriver{nullptr, nullptr};
@@ -193,15 +195,15 @@ static RCOutput_AioPRU rcoutDriver;
  */
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ERLEBRAIN2  || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(1, PCA9685_PRIMARY_ADDRESS), 24576000, 3, RPI_GPIO_<27>());
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(1, PCA9685_PRIMARY_ADDRESS), 24576000, 3, RPI_GPIO_<27>());
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIO
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(1, PCA9685_PRIMARY_ADDRESS), 24576000, 3, NAVIO_GPIO_PCA_OE);
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(1, PCA9685_PRIMARY_ADDRESS), 24576000, 3, NAVIO_GPIO_PCA_OE);
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(1, PCA9685_QUATENARY_ADDRESS), 0, 0, RPI_GPIO_<4>());
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(1, PCA9685_QUATENARY_ADDRESS), 0, 0, RPI_GPIO_<4>());
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DARK
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(1, PCA9685_QUINARY_ADDRESS), 0, 0, RPI_GPIO_<27>());
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(1, PCA9685_QUINARY_ADDRESS), 0, 0, RPI_GPIO_<27>());
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(4, PCA9685_PRIMARY_ADDRESS), 24576000, 0, RPI_GPIO_<26>());
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(4, PCA9685_PRIMARY_ADDRESS), 24576000, 0, RPI_GPIO_<26>());
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_ZYNQ || \
       CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OCPOC_ZYNQ
 static RCOutput_ZYNQ rcoutDriver;
@@ -218,7 +220,13 @@ static RCOutput_Sysfs rcoutDriver(0, 0, 15);
 #elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_RST_ZYNQ
 static RCOutput_Sysfs rcoutDriver(0, 0, 8);
 #elif  CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1
-static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device(1, PCA9685_PRIMARY_ADDRESS), 0, 0, RPI_GPIO_<17>());
+static RCOutput_PCA9685 rcoutDriver(i2c_mgr_instance.get_device_ptr(1, PCA9685_PRIMARY_ADDRESS), 0, 0, RPI_GPIO_<17>());
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_CANZERO
+static RCOutput_Sysfs rcoutDriver(0, 0, 2);
+#elif CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PILOTPI
+RCOutput_Multi::RCOutputGroup rcoutPcaDriver = {16, NEW_NOTHROW RCOutput_PCA9685(i2c_mgr_instance.get_device_ptr(1, PCA9685_PRIMARY_ADDRESS), 24576000, 0, -1) };
+RCOutput_Multi::RCOutputGroup rcoutSysfsDriver = {2, NEW_NOTHROW RCOutput_Sysfs(0, 0, 2)};
+static RCOutput_Multi rcoutDriver{2, &rcoutPcaDriver, &rcoutSysfsDriver};
 #else
 static Empty::RCOutput rcoutDriver;
 #endif
@@ -231,7 +239,9 @@ static OpticalFlow_Onboard opticalFlow;
 static Empty::OpticalFlow opticalFlow;
 #endif
 
+#if HAL_WITH_DSP
 static Empty::DSP dspDriver;
+#endif
 static Empty::Flash flashDriver;
 static Empty::WSPIDeviceManager wspi_mgr_instance;
 
@@ -241,22 +251,22 @@ static CANIface* canDrivers[HAL_NUM_CAN_IFACES];
 
 HAL_Linux::HAL_Linux() :
     AP_HAL::HAL(
-        &uartADriver,
-        &uartBDriver,
-        &uartCDriver,
-        &uartDDriver,
-        &uartEDriver,
-        &uartFDriver,
-        &uartGDriver,
-        &uartHDriver,
-        &uartIDriver,
-        &uartJDriver,
+        &serial0Driver,
+        &serial1Driver,
+        &serial2Driver,
+        &serial3Driver,
+        &serial4Driver,
+        &serial5Driver,
+        &serial6Driver,
+        &serial7Driver,
+        &serial8Driver,
+        &serial9Driver,
         &i2c_mgr_instance,
         &spi_mgr_instance,
         &wspi_mgr_instance,
         &analogIn,
         &storageDriver,
-        &uartADriver,
+        &serial0Driver,
         &gpioDriver,
         &rcinDriver,
         &rcoutDriver,
@@ -264,7 +274,9 @@ HAL_Linux::HAL_Linux() :
         &utilInstance,
         &opticalFlow,
         &flashDriver,
+#if HAL_WITH_DSP
         &dspDriver,
+#endif
 #if HAL_NUM_CAN_IFACES
         (AP_HAL::CANIface**)canDrivers
 #else
@@ -275,16 +287,16 @@ HAL_Linux::HAL_Linux() :
 
 void _usage(void)
 {
-    printf("Usage: --serial0 serial0Path --serial1 serial2Path \n");
+    printf("Usage: --serial0 serial0Path --serial1 serial1Path \n");
     printf("Examples:\n");
     printf("\tserial (0 through 9 available):\n");
     printf("\t                  --serial0 /dev/ttyO4\n");
     printf("\t                  --serial3 /dev/ttyS1\n");
-    printf("\tlegacy UART options still work, their mappings are:\n");
+    printf("\tlegacy UART options are deprecated, their mappings are:\n");
     printf("\t                  -A/--uartA is SERIAL0\n");
-    printf("\t                  -B/--uartB is SERIAL3\n");
-    printf("\t                  -C/--uartC is SERIAL1\n");
+    printf("\t                  -C/--uartC is SERIAL1\n"); // ordering captures the historical use of uartB as SERIAL3
     printf("\t                  -D/--uartD is SERIAL2\n");
+    printf("\t                  -B/--uartB is SERIAL3\n");
     printf("\t                  -E/--uartE is SERIAL4\n");
     printf("\t                  -F/--uartF is SERIAL5\n");
     printf("\t                  -G/--uartG is SERIAL6\n");
@@ -324,28 +336,41 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
     const char *module_path = AP_MODULE_DEFAULT_DIRECTORY;
 #endif
 
+    enum long_options {
+        CMDLINE_SERIAL0 = 1, // must be in 0-9 order and numbered consecutively
+        CMDLINE_SERIAL1,
+        CMDLINE_SERIAL2,
+        CMDLINE_SERIAL3,
+        CMDLINE_SERIAL4,
+        CMDLINE_SERIAL5,
+        CMDLINE_SERIAL6,
+        CMDLINE_SERIAL7,
+        CMDLINE_SERIAL8,
+        CMDLINE_SERIAL9,
+    };
+
     int opt;
     const struct GetOptLong::option options[] = {
         {"uartA",         true,  0, 'A'},
-        {"serial0",       true,  0, 'A'},
         {"uartB",         true,  0, 'B'},
-        {"serial3",       true,  0, 'B'},
         {"uartC",         true,  0, 'C'},
-        {"serial1",       true,  0, 'C'},
         {"uartD",         true,  0, 'D'},
-        {"serial2",       true,  0, 'D'},
         {"uartE",         true,  0, 'E'},
-        {"serial4",       true,  0, 'E'},
         {"uartF",         true,  0, 'F'},
-        {"serial5",       true,  0, 'F'},
         {"uartG",         true,  0, 'G'},
-        {"serial6",       true,  0, 'G'},
         {"uartH",         true,  0, 'H'},
-        {"serial7",       true,  0, 'H'},
         {"uartI",         true,  0, 'I'},
-        {"serial8",       true,  0, 'I'},
         {"uartJ",         true,  0, 'J'},
-        {"serial9",       true,  0, 'J'},
+        {"serial0",       true,  0, CMDLINE_SERIAL0},
+        {"serial1",       true,  0, CMDLINE_SERIAL1},
+        {"serial2",       true,  0, CMDLINE_SERIAL2},
+        {"serial3",       true,  0, CMDLINE_SERIAL3},
+        {"serial4",       true,  0, CMDLINE_SERIAL4},
+        {"serial5",       true,  0, CMDLINE_SERIAL5},
+        {"serial6",       true,  0, CMDLINE_SERIAL6},
+        {"serial7",       true,  0, CMDLINE_SERIAL7},
+        {"serial8",       true,  0, CMDLINE_SERIAL8},
+        {"serial9",       true,  0, CMDLINE_SERIAL9},
         {"log-directory",       true,  0, 'l'},
         {"terrain-directory",   true,  0, 't'},
         {"storage-directory",   true,  0, 's'},
@@ -365,34 +390,36 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
     while ((opt = gopt.getoption()) != -1) {
         switch (opt) {
         case 'A':
-            uartADriver.set_device_path(gopt.optarg);
-            break;
         case 'B':
-            uartBDriver.set_device_path(gopt.optarg);
-            break;
         case 'C':
-            uartCDriver.set_device_path(gopt.optarg);
-            break;
         case 'D':
-            uartDDriver.set_device_path(gopt.optarg);
-            break;
         case 'E':
-            uartEDriver.set_device_path(gopt.optarg);
-            break;
         case 'F':
-            uartFDriver.set_device_path(gopt.optarg);
-            break;
         case 'G':
-            uartGDriver.set_device_path(gopt.optarg);
-            break;
         case 'H':
-            uartHDriver.set_device_path(gopt.optarg);
-            break;
         case 'I':
-            uartIDriver.set_device_path(gopt.optarg);
+        case 'J': {
+            int uart_idx = opt - 'A';
+            // ordering captures the historical use of uartB as SERIAL3
+            static const uint8_t mapping[] = { 0, 3, 1, 2, 4, 5, 6, 7, 8, 9 };
+            int serial_idx = mapping[uart_idx];
+            printf("WARNING: deprecated option --uart%c/-%c will be removed in "
+                "a future release. Use --serial%d instead.\n",
+                (char)opt, (char)opt, serial_idx);
+            serialDrivers[serial_idx]->set_device_path(gopt.optarg);
             break;
-        case 'J':
-            uartJDriver.set_device_path(gopt.optarg);
+        }
+        case CMDLINE_SERIAL0:
+        case CMDLINE_SERIAL1:
+        case CMDLINE_SERIAL2:
+        case CMDLINE_SERIAL3:
+        case CMDLINE_SERIAL4:
+        case CMDLINE_SERIAL5:
+        case CMDLINE_SERIAL6:
+        case CMDLINE_SERIAL7:
+        case CMDLINE_SERIAL8:
+        case CMDLINE_SERIAL9:
+            serialDrivers[opt - CMDLINE_SERIAL0]->set_device_path(gopt.optarg);
             break;
         case 'l':
             utilInstance.set_custom_log_directory(gopt.optarg);
@@ -428,7 +455,11 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
         }
     }
 
-    setup_signal_handlers();
+    // NOTE: signal handlers are only set before the main loop, so
+    // that if anything before the loops hangs, the default signals
+    // can still stop the process proprely, although without proper
+    // teardown.
+    // This isn't perfect, but still prevents an unkillable process.
 
     scheduler->init();
     gpio->init();
@@ -457,6 +488,8 @@ void HAL_Linux::run(int argc, char* const argv[], Callbacks* callbacks) const
 #if AP_MODULE_SUPPORTED
     AP_Module::call_hook_setup_complete();
 #endif
+
+    setup_signal_handlers();
 
     while (!_should_exit) {
         callbacks->loop();
@@ -488,6 +521,11 @@ void HAL_Linux::exit_signal_handler(int signum)
 }
 
 const AP_HAL::HAL &AP_HAL::get_HAL()
+{
+    return hal_linux;
+}
+
+AP_HAL::HAL &AP_HAL::get_HAL_mutable()
 {
     return hal_linux;
 }

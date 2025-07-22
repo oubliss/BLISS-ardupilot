@@ -61,7 +61,7 @@ private:
     };
 
     // return true if the given message type should be sent
-    bool should_send(ViconTypeMask type_mask) const { return (((uint8_t)type_mask & _sitl->vicon_type_mask.get()) > 0); }
+    bool should_send(ViconTypeMask type_mask) const { return (((uint8_t)type_mask & _sitl->vicon.type_mask.get()) > 0); }
 
     // get unused index in msg_buf
     bool get_free_msg_buf_index(uint8_t &index);
@@ -77,6 +77,8 @@ private:
     // position delta message 
     Quaternion _attitude_prev; // Rotation to previous MAV_FRAME_BODY_FRD from MAV_FRAME_LOCAL_NED
     Vector3d _position_prev;  // previous position from origin (m) MAV_FRAME_LOCAL_NED
+
+    mavlink_status_t mav_status;
 };
 
 }

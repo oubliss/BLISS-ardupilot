@@ -5,14 +5,12 @@ AP_FLAKE8_CLEAN
 
 '''
 
-from __future__ import print_function
-
 import os
 
 from rover import AutoTestRover
 
-from common import AutoTestTimeoutException
-from common import PreconditionFailedException
+from vehicle_test_suite import AutoTestTimeoutException
+from vehicle_test_suite import PreconditionFailedException
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -45,10 +43,7 @@ class AutoTestSailboat(AutoTestRover):
             now = self.get_sim_time_cached()
             if now - tstart > timeout:
                 raise AutoTestTimeoutException("Didn't see wp 3")
-            m = self.mav.recv_match(type='MISSION_CURRENT',
-                                    blocking=True,
-                                    timeout=1)
-            self.progress("MISSION_CURRENT: %s" % str(m))
+            m = self.assert_receive_message('MISSION_CURRENT', verbose=True)
             if m.seq == 3:
                 break
 

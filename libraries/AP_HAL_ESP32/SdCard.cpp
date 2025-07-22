@@ -141,7 +141,7 @@ void mount_sdcard_mmc()
     // Pin 13 / chip-select  - is an interesting one, because if its the only thing on this
     //   spi bus(it is), then NOT connecting the SD to this pin, and instead directly to a pull-up
     //   also asserts the CS pin 'permanently high' to the SD card, without the micro being involved..
-    //   which means pin 13 on micro can be re-used elsewhere. If one of these isnt true for u,
+    //   which means pin 13 on micro can be re-used elsewhere. If one of these isn't true for u,
     //   then uncomment this line and connect it electrically to the CS pin on the SDcard.
     //gpio_set_pull_mode(GPIO_NUM_13, GPIO_PULLUP_ONLY);   // D3, needed in 4- and 1-line modes
 
@@ -164,7 +164,6 @@ void mount_sdcard_mmc()
     // production applications.
     sdmmc_card_t* card;
     esp_err_t ret = esp_vfs_fat_sdmmc_mount("/SDCARD", &host, &slot_config, &mount_config, &card);
-
 
     if (ret == ESP_OK) {
         mkdir("/SDCARD/APM", 0777);
@@ -208,7 +207,7 @@ void mount_sdcard_spi()
     ESP_LOGI(TAG, "Initializing SD card as SDSPI");
     esp_vfs_fat_sdmmc_mount_config_t mount_config = {
         .format_if_mount_failed = false,
-        .max_files = 10,
+        .max_files = 5,
         .allocation_unit_size = 16 * 1024
     };
 
@@ -253,8 +252,8 @@ void mount_sdcard()
 {
     mount_sdcard_spi();
 }
-#endif // end spi
 
+#endif // end spi
 
 bool sdcard_retry(void)
 {
@@ -264,15 +263,13 @@ bool sdcard_retry(void)
     return sdcard_running;
 }
 
-
 void unmount_sdcard()
 {
     if (card != nullptr) {
-        esp_vfs_fat_sdmmc_unmount();
+        esp_vfs_fat_sdcard_unmount( "/SDCARD", card);
     }
     sdcard_running = false;
 }
-
 
 #else
 // empty impl's

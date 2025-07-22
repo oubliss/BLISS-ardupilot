@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+# flake8: noqa
 '''
 convert a betaflight unified configuration file into a hwdef.dat
 currently very approximate, file requires cleanup afterwards
@@ -45,6 +47,7 @@ alignment = {
     "CW90FLIP" : "ROTATION_ROLL_180",
     "CW180FLIP" : "ROTATION_ROLL_180_YAW_90",
     "CW270FLIP" : "ROTATION_PITCH_180",
+    "DEFAULT" : "ROTATION_NONE",
 }
 
 parser = argparse.ArgumentParser("convert_betaflight_unified.py")
@@ -106,8 +109,32 @@ def write_imu_config(f, n):
     f.write('''
 # IMU setup
 SPIDEV imu%s   SPI%s DEVID1 GYRO%s_CS   MODE3   1*MHZ   8*MHZ
-IMU Invensense SPI:imu%s %s
-''' % (n, bus, n, n, alignment[align]))
+''' % (n, bus, n))
+
+    c = 0
+    found_imu = False
+    for define in defines:
+        for imudefine in ['USE_GYRO_SPI_', 'USE_ACCGYRO_']:
+            if define.startswith(imudefine):
+                imu = define[len(imudefine):]
+                c = c + 1
+                found_imu = True
+                if c == int(n):
+                    if imu == 'ICM42688P':
+                        imudriver = 'Invensensev3'
+                    elif imu == 'BMI270':
+                        imudriver = 'BMI270'
+                    else:
+                        imudriver = 'Invensense'
+                    f.write('''
+IMU %s SPI:imu%s %s
+''' % (imudriver, n, alignment[align]))
+    # no driver found, pick v3 by default
+    if not found_imu:
+        f.write('''
+IMU %s SPI:imu%s %s
+''' % ('Invensensev3', n, alignment[align]))
+
     dma = "SPI" + bus + "*"
     dma_noshare[dma] = dma
 
@@ -139,6 +166,11 @@ def convert_file(fname, board_id):
         reserve_start = 96
     elif mcuclass == "H7":
         reserve_start = 384
+    else:
+        mcuclass = "F4"
+        mcu = "F405"
+        flash_size = 1024
+        reserve_start = 48
 
     # preamble
 
@@ -169,6 +201,9 @@ define STORAGE_FLASH_PAGE 1
         line = lines[i]
         if line.startswith('resource'):
             a = line.split()
+
+            if a[3] == 'NONE':
+                continue
             # function, number, pin
             pin = convert_pin(a[3])
             resource = [ a[2] , pin, a[1].split('_')[0], a[1] ]
@@ -229,14 +264,20 @@ define STORAGE_FLASH_PAGE 1
         if (spin != int(spi[0])):
             spin = int(spi[0])
             f.write("\n# SPI%s\n" % spin)
-        f.write("%s SPI%s_%s SPI%s\n" % (spi[1], spin, spi[3].split('_')[1], spin))
+        fn = spi[3].split('_')[1]
+        if fn == "SDI":
+            fn = "MISO"
+        elif fn == "SDO":
+            fn = "MOSI"
+        f.write("%s SPI%s_%s SPI%s\n" % (spi[1], spin, fn, spin))
 
     f.write("\n# Chip select pins\n")
     for cs in chip_select.values():
         f.write("%s %s%s_CS CS\n" % (cs[1], cs[2], int(cs[0])))
 
-    beeper = list(functions["BEEPER"].values())[0]
-    f.write('''\n# Beeper
+    if len(functions["BEEPER"].values()) > 0:
+        beeper = list(functions["BEEPER"].values())[0]
+        f.write('''\n# Beeper
 %s BUZZER OUTPUT GPIO(80) LOW
 define HAL_BUZZER_PIN 80
 ''' % beeper[1])
@@ -316,7 +357,7 @@ define HAL_BATT_VOLT_SCALE 11.0
             f.write("%s BATT_CURRENT_SENS %s SCALE(1)\n" % (adc[1], name))
             f.write('''define HAL_BATT_CURR_PIN %s
 define HAL_BATT_CURR_SCALE %.1f
-''' % (get_ADC1_chan(mcu, adc[1]), int(settings['ibata_scale']) * 59.5 / 168 )) # scale taken from KakuteH7
+''' % (get_ADC1_chan(mcu, adc[1]), 10000 / int(settings['ibata_scale'])))
         elif (adc[3] == "ADC_RSSI"):
             f.write("%s RSSI_ADC %s\n" % (adc[1], name))
             f.write("define BOARD_RSSI_ANA_PIN %s\n" % (get_ADC1_chan(mcu, adc[1])))
@@ -328,13 +369,15 @@ define HAL_BATT_CURR_SCALE %.1f
     nmotors = 0
     # PIN  TIMx_CHy TIMx PWM(p) GPIO(g)
     for pin, motor in functions["MOTOR"].items():
+        if not pin in timers:
+            continue
         timer = timers[pin]
         nmotors = max(nmotors, int(motor[0]))
         # for safety don't share the _UP channel
         dma_noshare[timer[1] + '_UP'] =  timer[1] + '_UP'
         f.write("%s %s_%s %s PWM(%s) GPIO(%s)" % (motor[1], timer[1], timer[2], timer[1], motor[0], 49+int(motor[0])))
         # on H7 we can reasonably safely assign bi-dir channel
-        if mcuclass == "H7" and (int(timer[2][2:]) == 1 or int(timer[2][2:]) == 3):
+        if not timer[2][2:].endswith("N") and mcuclass == "H7" and (int(timer[2][2:]) == 1 or int(timer[2][2:]) == 3):
             f.write(" BIDIR # M%s\n" % (motor[0]))
         else:
             f.write("       # M%s\n" % (motor[0]))
@@ -344,6 +387,8 @@ define HAL_BATT_CURR_SCALE %.1f
     for led in sorted(functions["LED"].values()):
         if (led[3].endswith('_STRIP')):
             pin = led[1]
+            if not pin in timers.keys():
+                continue
             timer = timers[pin]
             nmotors = nmotors+1
             f.write("%s %s_%s %s PWM(%s) GPIO(%s) # M%s\n" % (led[1], timer[1], timer[2], timer[1], nmotors, 49+nmotors, nmotors))
@@ -353,10 +398,9 @@ define HAL_BATT_CURR_SCALE %.1f
 %s LED%u OUTPUT LOW GPIO(%u)
 define HAL_GPIO_%s_LED_PIN %u
 ''' % (led[1], ledn-1, 89+ledn, chr(ledn+64), 89+ledn))
-    f.write("define HAL_GPIO_LED_OFF 1\n")
 
     # write out devices
-    if settings['blackbox_device'] == 'SPIFLASH':
+    if 'blackbox_device' in settings and settings['blackbox_device'] == 'SPIFLASH' or 'USE_FLASH' in defines:
         write_flash_config(f, settings['flash_spi_bus'])
 
     if 'max7456_spi_bus' in settings:
@@ -437,6 +481,11 @@ def convert_bootloader(fname, board_id):
         reserve_start = 96
     elif mcuclass == "H7":
         reserve_start = 384
+    else:
+        mcuclass = "F4"
+        mcu = "F405"
+        flash_size = 1024
+        reserve_start = 48
 
     # preamble
 

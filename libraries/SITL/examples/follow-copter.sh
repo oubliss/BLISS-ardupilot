@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Usage - From ardupilot root directory, run - libraries/SITL/examples/follow-copter.sh $GCS_IP
 # $GCS_IP is the IP address of the system running the GCs, by default is 127.0.0.1
@@ -70,12 +70,12 @@ mkdir -p copter1
 
 # create default parameter file for the leader
 cat <<EOF > copter1/leader.parm
-SYSID_THISMAV 1
+MAV_SYSID 1
 AUTO_OPTIONS 7
 EOF
 
 pushd copter1
-$COPTER --model quad --home=$HOMELAT,$HOMELONG,$HOMEALT,0 --uartA udpclient:$GCS_IP --uartC mcast:$MCAST_IP_PORT --defaults $BASE_DEFAULTS,leader.parm &
+$COPTER --model quad --home=$HOMELAT,$HOMELONG,$HOMEALT,0 --serial0 udpclient:$GCS_IP --serial1 mcast:$MCAST_IP_PORT --defaults $BASE_DEFAULTS,leader.parm &
 popd
 
 # now start other copters to follow the first, using
@@ -90,7 +90,7 @@ for i in $(seq $NCOPTERS); do
 
     # create default parameter file for the follower
     cat <<EOF > copter$i/follow.parm
-SYSID_THISMAV $SYSID
+MAV_SYSID $SYSID
 FOLL_ENABLE 1
 FOLL_OFS_X $(echo "-5*$i" | bc -l)
 FOLL_OFS_TYPE 1
@@ -103,7 +103,7 @@ EOF
     pushd copter$i
     LAT=$(echo "$HOMELAT + 0.0005*$i" | bc -l)
     LONG=$(echo "$HOMELONG + 0.0005*$i" | bc -l)
-    $COPTER --model quad --home=$LAT,$LONG,$HOMEALT,0 --uartA tcp:0 --uartC mcast:$MCAST_IP_PORT --instance $i --defaults $BASE_DEFAULTS,follow.parm &
+    $COPTER --model quad --home=$LAT,$LONG,$HOMEALT,0 --serial0 tcp:0 --serial1 mcast:$MCAST_IP_PORT --instance $i --defaults $BASE_DEFAULTS,follow.parm &
     popd
 done
 wait

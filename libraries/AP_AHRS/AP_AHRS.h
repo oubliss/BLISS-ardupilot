@@ -25,6 +25,7 @@
 
 #include <AP_HAL/Semaphores.h>
 
+#include "AP_AHRS_Backend.h"
 #include <AP_NavEKF2/AP_NavEKF2.h>
 #include <AP_NavEKF3/AP_NavEKF3.h>
 #include <AP_NavEKF/AP_Nav_Common.h>              // definitions shared by inertial and ekf nav filters
@@ -32,6 +33,7 @@
 #include "AP_AHRS_DCM.h"
 #include "AP_AHRS_SIM.h"
 #include "AP_AHRS_External.h"
+#include <AP_NavEKF/AP_Nav_Common.h>
 
 // forward declare view class
 class AP_AHRS_View;
@@ -46,9 +48,18 @@ class AP_AHRS {
     friend class AP_AHRS_View;
 public:
 
+    // copy this into our namespace
+    using Status = NavFilterStatusBit;
+
     enum Flags {
         FLAG_ALWAYS_USE_EKF = 0x1,
     };
+
+    // has_status returns information about the EKF health and
+    // capabilities.  It is currently invalid to call this when a
+    // backend is in charge which returns false for get_filter_status
+    // - so this will simply return false for DCM, for example.
+    bool has_status(Status status) const;
 
     // Constructor
     AP_AHRS(uint8_t flags = 0);
@@ -114,8 +125,27 @@ public:
     // return a wind estimation vector, in m/s; returns 0,0,0 on failure
     bool wind_estimate(Vector3f &wind) const;
 
+    // Determine how aligned heading_deg is with the wind. Return result
+    // is 1.0 when perfectly aligned heading into wind, -1 when perfectly
+    // aligned with-wind, and zero when perfect cross-wind. There is no
+    // distinction between a left or right cross-wind. Wind speed is ignored
+    float wind_alignment(const float heading_deg) const;
+
+    // returns forward head-wind component in m/s. Negative means tail-wind
+    float head_wind(void) const;
+
     // instruct DCM to update its wind estimate:
-    void estimate_wind() { dcm.estimate_wind(); }
+    void estimate_wind() {
+#if AP_AHRS_DCM_ENABLED
+        dcm.estimate_wind();
+#endif
+    }
+
+#if AP_AHRS_EXTERNAL_WIND_ESTIMATE_ENABLED
+    void set_external_wind_estimate(float speed, float direction) {
+        dcm.set_external_wind_estimate(speed, direction);
+    }
+#endif
 
     // return the parameter AHRS_WIND_MAX in metres per second
     uint8_t get_max_wind() const {
@@ -127,13 +157,29 @@ public:
      */
 
     // get apparent to true airspeed ratio
-    float get_EAS2TAS(void) const {
-        return state.EAS2TAS;
-    }
+    float get_EAS2TAS(void) const;
+
+    // get air density / sea level density - decreases as altitude climbs
+    float get_air_density_ratio(void) const;
+    
+    // return an (equivalent) airspeed estimate if available. return true
+    // if we have an estimate
+    bool airspeed_estimate(float &airspeed_ret) const;
+
+    enum AirspeedEstimateType : uint8_t {
+        NO_NEW_ESTIMATE = 0,
+        AIRSPEED_SENSOR = 1,
+        DCM_SYNTHETIC = 2,
+        EKF3_SYNTHETIC = 3,
+        SIM = 4,
+    };
 
     // return an airspeed estimate if available. return true
     // if we have an estimate
-    bool airspeed_estimate(float &airspeed_ret) const;
+    bool airspeed_estimate(float &airspeed_ret, AirspeedEstimateType &type) const;
+
+    // return true if the current AHRS airspeed estimate (from airspeed_estimate method) is directly derived from an airspeed sensor
+    bool using_airspeed_sensor() const;
 
     // return a true airspeed estimate (navigation airspeed) if
     // available. return true if we have an estimate
@@ -147,18 +193,19 @@ public:
     // returns false if the data is unavailable
     bool airspeed_health_data(float &innovation, float &innovationVariance, uint32_t &age_ms) const;
 
-    // return true if airspeed comes from an airspeed sensor, as
-    // opposed to an IMU estimate
-    bool airspeed_sensor_enabled(void) const;
-
-    // return true if airspeed comes from a specific airspeed sensor, as
-    // opposed to an IMU estimate
-    bool airspeed_sensor_enabled(uint8_t airspeed_index) const {
+    // return true if a airspeed sensor is enabled
+    bool airspeed_sensor_enabled(void) const {
         // FIXME: make this a method on the active backend
-        return dcm.airspeed_sensor_enabled(airspeed_index);
+        return AP_AHRS_Backend::airspeed_sensor_enabled();
     }
 
-    // return a synthetic airspeed estimate (one derived from sensors
+    // return true if a airspeed from a specific airspeed sensor is enabled
+    bool airspeed_sensor_enabled(uint8_t airspeed_index) const {
+        // FIXME: make this a method on the active backend
+        return AP_AHRS_Backend::airspeed_sensor_enabled(airspeed_index);
+    }
+
+    // return a synthetic (equivalent) airspeed estimate (one derived from sensors
     // other than an actual airspeed sensor), if available. return
     // true if we have a synthetic airspeed.  ret will not be modified
     // on failure.
@@ -232,17 +279,29 @@ public:
     // return the relative position NED from either home or origin
     // return true if the estimate is valid
     bool get_relative_position_NED_home(Vector3f &vec) const WARN_IF_UNUSED;
-    bool get_relative_position_NED_origin(Vector3f &vec) const WARN_IF_UNUSED;
+    bool get_relative_position_NED_origin(Vector3p &vec) const WARN_IF_UNUSED;
+    bool get_relative_position_NED_origin_float(Vector3f &vec) const WARN_IF_UNUSED;
 
     // return the relative position NE from home or origin
     // return true if the estimate is valid
     bool get_relative_position_NE_home(Vector2f &posNE) const WARN_IF_UNUSED;
-    bool get_relative_position_NE_origin(Vector2f &posNE) const WARN_IF_UNUSED;
+    bool get_relative_position_NE_origin(Vector2p &posNE) const WARN_IF_UNUSED;
+    bool get_relative_position_NE_origin_float(Vector2f &posNE) const WARN_IF_UNUSED;
 
     // return the relative position down from home or origin
     // baro will be used for the _home relative one if the EKF isn't
     void get_relative_position_D_home(float &posD) const;
-    bool get_relative_position_D_origin(float &posD) const WARN_IF_UNUSED;
+    bool get_relative_position_D_origin(postype_t &posD) const WARN_IF_UNUSED;
+    bool get_relative_position_D_origin_float(float &posD) const WARN_IF_UNUSED;
+
+    // return location corresponding to vector relative to the
+    // vehicle's origin
+    bool get_location_from_origin_offset_NED(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
+    bool get_location_from_home_offset_NED(Location &loc, const Vector3p &offset_ned) const WARN_IF_UNUSED;
+
+    // get velocity down in m/s.  This returns get_velocity_NED.z() if available, otherwise falls back to get_vert_pos_rate_D()
+    // if high_vibes is true then this is equivalent to get_vert_pos_rate_D
+    bool get_velocity_D(float &velD, bool high_vibes = false) const WARN_IF_UNUSED;
 
     // Get a derivative of the vertical position in m/s which is kinematically consistent with the vertical position is required by some control loops.
     // This is different to the vertical velocity from the EKF which is not always consistent with the vertical position due to the various errors that are being corrected for.
@@ -280,10 +339,12 @@ public:
     // true if the AHRS has completed initialisation
     bool initialised() const;
 
+#if AP_AHRS_DCM_ENABLED
     // return true if *DCM* yaw has been initialised
     bool dcm_yaw_initialised(void) const {
         return dcm.yaw_initialised();
     }
+#endif
 
     // get_filter_status - returns filter status as a series of flags
     bool get_filter_status(nav_filter_status &status) const;
@@ -373,7 +434,7 @@ public:
     void request_yaw_reset(void);
 
     // set position, velocity and yaw sources to either 0=primary, 1=secondary, 2=tertiary
-    void set_posvelyaw_source_set(uint8_t source_set_idx);
+    void set_posvelyaw_source_set(AP_NavEKF_Source::SourceSetSelection source_set_idx);
 
     //returns index of active source set used, 0=primary, 1=secondary, 2=tertiary
     uint8_t get_posvelyaw_source_set() const;
@@ -394,6 +455,29 @@ public:
         return _ekf_type;
     }
 
+    enum class EKFType : uint8_t {
+#if AP_AHRS_DCM_ENABLED
+        DCM = 0,
+#endif
+#if HAL_NAVEKF3_AVAILABLE
+        THREE = 3,
+#endif
+#if HAL_NAVEKF2_AVAILABLE
+        TWO = 2,
+#endif
+#if AP_AHRS_SIM_ENABLED
+        SIM = 10,
+#endif
+#if AP_AHRS_EXTERNAL_ENABLED
+        EXTERNAL = 11,
+#endif
+    };
+
+    // set the selected ekf type, for RC aux control
+    void set_ekf_type(EKFType ahrs_type) {
+        _ekf_type.set(ahrs_type);
+    }
+    
     // these are only out here so vehicles can reference them for parameters
 #if HAL_NAVEKF2_AVAILABLE
     NavEKF2 EKF2;
@@ -488,14 +572,23 @@ public:
      * Attitude-related public methods and attributes:
      */
 
-    // roll/pitch/yaw euler angles, all in radians
-    float roll;
-    float pitch;
-    float yaw;
-
+#if AP_SCRIPTING_ENABLED
+    // deprecated functions for accessing rpy.  Do not use, these will
+    // be removed.
     float get_roll() const { return roll; }
     float get_pitch() const { return pitch; }
     float get_yaw() const { return yaw; }
+#endif  // AP_SCRIPTING_ENABLED
+
+    // roll/pitch/yaw euler angles, all in radians
+    float get_roll_rad() const { return roll; }
+    float get_pitch_rad() const { return pitch; }
+    float get_yaw_rad() const { return yaw; }
+
+    // roll/pitch/yaw euler angles, all in degrees
+    float get_roll_deg() const { return rpy_deg[0]; }
+    float get_pitch_deg() const { return rpy_deg[1]; }
+    float get_yaw_deg() const { return rpy_deg[2]; }
 
     // helper trig value accessors
     float cos_roll() const  {
@@ -517,6 +610,9 @@ public:
         return _sin_yaw;
     }
 
+    // floating point Euler angles (Degrees)
+    float rpy_deg[3];
+
     // integer Euler angles (Degrees * 100)
     int32_t roll_sensor;
     int32_t pitch_sensor;
@@ -527,11 +623,13 @@ public:
     // return a Quaternion representing our current attitude in NED frame
     void get_quat_body_to_ned(Quaternion &quat) const;
 
+#if AP_AHRS_DCM_ENABLED
     // get rotation matrix specifically from DCM backend (used for
     // compass calibrator)
     const Matrix3f &get_DCM_rotation_body_to_ned(void) const {
         return dcm_estimates.dcm_matrix;
     }
+#endif
 
     // rotate a 2D vector from earth frame to body frame
     // in result, x is forward, y is right
@@ -553,9 +651,9 @@ public:
     // return current vibration vector for primary IMU
     Vector3f get_vibration(void) const;
 
-    // return primary accels, for lua
+    // return primary accels
     const Vector3f &get_accel(void) const {
-        return AP::ins().get_accel();
+        return AP::ins().get_accel(_get_primary_accel_index());
     }
 
     // return primary accel bias. This should be subtracted from
@@ -620,6 +718,11 @@ public:
 
 private:
 
+    // roll/pitch/yaw euler angles, all in radians
+    float roll;
+    float pitch;
+    float yaw;
+
     // optional view class
     AP_AHRS_View *_view;
 
@@ -639,7 +742,7 @@ private:
      */
     AP_Int8 _wind_max;
     AP_Int8 _board_orientation;
-    AP_Int8 _ekf_type;
+    AP_Enum<EKFType> _ekf_type;
 
     /*
      * DCM-backend parameters; it takes references to these
@@ -654,21 +757,6 @@ private:
     AP_Enum<GPSUse> _gps_use;
     AP_Int8 _gps_minsats;
 
-    enum class EKFType {
-        NONE = 0,
-#if HAL_NAVEKF3_AVAILABLE
-        THREE = 3,
-#endif
-#if HAL_NAVEKF2_AVAILABLE
-        TWO = 2,
-#endif
-#if AP_AHRS_SIM_ENABLED
-        SIM = 10,
-#endif
-#if HAL_EXTERNAL_AHRS_ENABLED
-        EXTERNAL = 11,
-#endif
-    };
     EKFType active_EKF_type(void) const { return state.active_EKF; }
 
     bool always_use_EKF() const {
@@ -712,18 +800,12 @@ private:
     void update_EKF3(void);
 #endif
 
-    // rotation from vehicle body to NED frame
-
-
     const uint16_t startup_delay_ms = 1000;
     uint32_t start_time_ms;
     uint8_t _ekf_flags; // bitmask from Flags enumeration
 
     EKFType ekf_type(void) const;
     void update_DCM();
-
-    // get the index of the current primary IMU
-    uint8_t get_primary_IMU_index(void) const { return state.primary_IMU; }
 
     /*
      * home-related state
@@ -756,7 +838,7 @@ private:
     void update_SITL(void);
 #endif
 
-#if HAL_EXTERNAL_AHRS_ENABLED
+#if AP_AHRS_EXTERNAL_ENABLED
     void update_external(void);
 #endif    
 
@@ -808,25 +890,6 @@ private:
     void update_notify_from_filter_status(const nav_filter_status &status);
 
     /*
-     *  backends (and their results)
-     */
-    AP_AHRS_DCM dcm{_kp_yaw, _kp, gps_gain, beta, _gps_use, _gps_minsats};
-    struct AP_AHRS_Backend::Estimates dcm_estimates;
-#if AP_AHRS_SIM_ENABLED
-#if HAL_NAVEKF3_AVAILABLE
-    AP_AHRS_SIM sim{EKF3};
-#else
-    AP_AHRS_SIM sim;
-#endif
-    struct AP_AHRS_Backend::Estimates sim_estimates;
-#endif
-
-#if HAL_EXTERNAL_AHRS_ENABLED
-    AP_AHRS_External external;
-    struct AP_AHRS_Backend::Estimates external_estimates;
-#endif
-
-    /*
      * copy results from a backend over AP_AHRS canonical results.
      * This updates member variables like roll and pitch, as well as
      * updating derived values like sin_roll and sin_pitch.
@@ -840,7 +903,7 @@ private:
 
     // return an airspeed estimate if available. return true
     // if we have an estimate
-    bool _airspeed_estimate(float &airspeed_ret) const;
+    bool _airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &status) const;
 
     // return secondary attitude solution if available, as eulers in radians
     bool _get_secondary_attitude(Vector3f &eulers) const;
@@ -859,11 +922,11 @@ private:
 
     // return a true airspeed estimate (navigation airspeed) if
     // available. return true if we have an estimate
-    bool _airspeed_estimate_true(float &airspeed_ret) const;
+    bool _airspeed_TAS(float &airspeed_ret) const;
 
     // return estimate of true airspeed vector in body frame in m/s
     // returns false if estimate is unavailable
-    bool _airspeed_vector_true(Vector3f &vec) const;
+    bool _airspeed_TAS(Vector3f &vec) const;
 
     // return the quaternion defining the rotation from NED to XYZ (body) axes
     bool _get_quaternion(Quaternion &quat) const WARN_IF_UNUSED;
@@ -904,11 +967,18 @@ private:
 
     // get current location estimate
     bool _get_location(Location &loc) const;
+
+    // return true if a airspeed sensor should be used for the AHRS airspeed estimate
+    bool _should_use_airspeed_sensor(uint8_t airspeed_index) const;
     
     /*
       update state structure
      */
     void update_state(void);
+
+    // returns an EKF type to be used as active if we decide the
+    // primary is not good enough.
+    EKFType fallback_active_EKF_type(void) const;
 
     /*
       state updated at the end of each update() call
@@ -929,6 +999,7 @@ private:
         float EAS2TAS;
         bool airspeed_ok;
         float airspeed;
+        AirspeedEstimateType airspeed_estimate_type;
         bool airspeed_true_ok;
         float airspeed_true;
         Vector3f airspeed_vec;
@@ -952,6 +1023,41 @@ private:
         Vector3f velocity_NED;
         bool velocity_NED_ok;
     } state;
+
+    /*
+     *  backends (and their results)
+     */
+#if AP_AHRS_DCM_ENABLED
+    AP_AHRS_DCM dcm{_kp_yaw, _kp, gps_gain, beta, _gps_use, _gps_minsats};
+    struct AP_AHRS_Backend::Estimates dcm_estimates;
+#endif
+#if AP_AHRS_SIM_ENABLED
+#if HAL_NAVEKF3_AVAILABLE
+    AP_AHRS_SIM sim{EKF3};
+#else
+    AP_AHRS_SIM sim;
+#endif
+    struct AP_AHRS_Backend::Estimates sim_estimates;
+#endif
+
+#if AP_AHRS_EXTERNAL_ENABLED
+    AP_AHRS_External external;
+    struct AP_AHRS_Backend::Estimates external_estimates;
+#endif
+
+    enum class Options : uint16_t {
+        DISABLE_DCM_FALLBACK_FW=(1U<<0),
+        DISABLE_DCM_FALLBACK_VTOL=(1U<<1),
+        DISABLE_AIRSPEED_EKF_CHECK=(1U<<2),
+    };
+    AP_Int16 _options;
+    
+    bool option_set(Options option) const {
+        return (_options & uint16_t(option)) != 0;
+    }
+
+    // true when we have completed the common origin setup
+    bool done_common_origin;
 };
 
 namespace AP {

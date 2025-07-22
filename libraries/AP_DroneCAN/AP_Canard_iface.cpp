@@ -9,6 +9,7 @@
 extern const AP_HAL::HAL& hal;
 #define LOG_TAG "DroneCANIface"
 #include <canard.h>
+#include <AP_CANManager/AP_CANSensor.h>
 
 #define DEBUG_PKTS 0
 
@@ -29,7 +30,7 @@ HAL_Semaphore test_iface_sem;
 
 void canard_allocate_sem_take(CanardPoolAllocator *allocator) {
     if (allocator->semaphore == nullptr) {
-        allocator->semaphore = new HAL_Semaphore;
+        allocator->semaphore = NEW_NOTHROW HAL_Semaphore;
         if (allocator->semaphore == nullptr) {
             // out of memory
             CANARD_ASSERT(0);
@@ -185,7 +186,7 @@ bool CanardInterface::shouldAcceptTransfer(const CanardInstance* ins,
                                            CanardTransferType transfer_type,
                                            uint8_t source_node_id) {
     CanardInterface* iface = (CanardInterface*) ins->user_reference;
-    return iface->accept_message(data_type_id, *out_data_type_signature);
+    return iface->accept_message(data_type_id, transfer_type, *out_data_type_signature);
 }
 
 #if AP_TEST_DRONECAN_DRIVERS
@@ -214,6 +215,20 @@ void CanardInterface::processTx(bool raw_commands_only = false) {
         if (txq == nullptr) {
             return;
         }
+        // volatile as the value can change at any time during can interrupt
+        // we need to ensure that this is not optimized
+        volatile const auto *stats = ifaces[iface]->get_statistics();
+        uint64_t last_transmit_us = stats==nullptr?0:stats->last_transmit_us;
+        bool iface_down = true;
+        if (stats == nullptr || (AP_HAL::micros64() - last_transmit_us) < 200000UL) {
+            /*
+            We were not able to queue the frame for
+            sending. Only mark the send as failing if the
+            interface is active. We consider an interface as
+            active if it has had successful transmits for some time.
+            */
+            iface_down = false;
+        } 
         // scan through list of pending transfers
         while (true) {
             auto txf = &txq->frame;
@@ -240,15 +255,22 @@ void CanardInterface::processTx(bool raw_commands_only = false) {
             if (!write) {
                 // if there is no space then we need to start from the
                 // top of the queue, so wait for the next loop
-                break;
-            }
-            if ((txf->iface_mask & (1U<<iface)) && (AP_HAL::micros64() < txf->deadline_usec)) {
+                if (!iface_down) {
+                    break;
+                } else {
+                    txf->iface_mask &= ~(1U<<iface);
+                }
+            } else if ((txf->iface_mask & (1U<<iface)) && (AP_HAL::micros64() < txf->deadline_usec)) {
                 // try sending to interfaces, clearing the mask if we succeed
                 if (ifaces[iface]->send(txmsg, txf->deadline_usec, 0) > 0) {
                     txf->iface_mask &= ~(1U<<iface);
                 } else {
                     // if we fail to send then we try sending on next interface
-                    break;
+                    if (!iface_down) {
+                        break;
+                    } else {
+                        txf->iface_mask &= ~(1U<<iface);
+                    }
                 }
             }
             // look at next transfer
@@ -263,38 +285,38 @@ void CanardInterface::processTx(bool raw_commands_only = false) {
 
 void CanardInterface::update_rx_protocol_stats(int16_t res)
 {
-    switch (res) {
+    switch (-res) {
     case CANARD_OK:
         protocol_stats.rx_frames++;
         break;
-    case -CANARD_ERROR_OUT_OF_MEMORY:
+    case CANARD_ERROR_OUT_OF_MEMORY:
         protocol_stats.rx_error_oom++;
         break;
-    case -CANARD_ERROR_INTERNAL:
+    case CANARD_ERROR_INTERNAL:
         protocol_stats.rx_error_internal++;
         break;
-    case -CANARD_ERROR_RX_INCOMPATIBLE_PACKET:
+    case CANARD_ERROR_RX_INCOMPATIBLE_PACKET:
         protocol_stats.rx_ignored_not_wanted++;
         break;
-    case -CANARD_ERROR_RX_WRONG_ADDRESS:
+    case CANARD_ERROR_RX_WRONG_ADDRESS:
         protocol_stats.rx_ignored_wrong_address++;
         break;
-    case -CANARD_ERROR_RX_NOT_WANTED:
+    case CANARD_ERROR_RX_NOT_WANTED:
         protocol_stats.rx_ignored_not_wanted++;
         break;
-    case -CANARD_ERROR_RX_MISSED_START:
+    case CANARD_ERROR_RX_MISSED_START:
         protocol_stats.rx_error_missed_start++;
         break;
-    case -CANARD_ERROR_RX_WRONG_TOGGLE:
+    case CANARD_ERROR_RX_WRONG_TOGGLE:
         protocol_stats.rx_error_wrong_toggle++;
         break;
-    case -CANARD_ERROR_RX_UNEXPECTED_TID:
+    case CANARD_ERROR_RX_UNEXPECTED_TID:
         protocol_stats.rx_ignored_unexpected_tid++;
         break;
-    case -CANARD_ERROR_RX_SHORT_FRAME:
+    case CANARD_ERROR_RX_SHORT_FRAME:
         protocol_stats.rx_error_short_frame++;
         break;
-    case -CANARD_ERROR_RX_BAD_CRC:
+    case CANARD_ERROR_RX_BAD_CRC:
         protocol_stats.rx_error_bad_crc++;
         break;
     default:
@@ -325,6 +347,15 @@ void CanardInterface::processRx() {
             if (ifaces[i]->receive(rxmsg, timestamp, flags) <= 0) {
                 break;
             }
+
+            if (!rxmsg.isExtended()) {
+                // 11 bit frame, see if we have a handler
+                if (aux_11bit_driver != nullptr) {
+                    aux_11bit_driver->handle_frame(rxmsg);
+                }
+                continue;
+            }
+
             rx_frame.data_len = AP_HAL::CANFrame::dlcToDataLength(rxmsg.dlc);
             memcpy(rx_frame.data, rxmsg.data, rx_frame.data_len);
 #if HAL_CANFD_SUPPORTED
@@ -375,10 +406,9 @@ void CanardInterface::process(uint32_t duration_ms) {
             WITH_SEMAPHORE(_sem_tx);
             canardCleanupStaleTransfers(&canard, AP_HAL::micros64());
         }
-        uint64_t now = AP_HAL::micros64();
+        const uint64_t now = AP_HAL::micros64();
         if (now < deadline) {
-            _event_handle.wait(MIN(UINT16_MAX - 2U, deadline - now));
-            hal.scheduler->delay_microseconds(50);
+            IGNORE_RETURN(sem_handle.wait(deadline - now));
         } else {
             break;
         }
@@ -405,7 +435,7 @@ bool CanardInterface::add_interface(AP_HAL::CANIface *can_iface)
         AP::can().log_text(AP_CANManager::LOG_ERROR, LOG_TAG, "DroneCANIfaceMgr: Can't alloc uavcan::iface\n");
         return false;
     }
-    if (!can_iface->set_event_handle(&_event_handle)) {
+    if (!can_iface->set_event_handle(&sem_handle)) {
         AP::can().log_text(AP_CANManager::LOG_ERROR, LOG_TAG, "DroneCANIfaceMgr: Setting event handle failed\n");
         return false;
     }
@@ -413,4 +443,30 @@ bool CanardInterface::add_interface(AP_HAL::CANIface *can_iface)
     num_ifaces++;
     return true;
 }
+
+// add an 11 bit auxillary driver
+bool CanardInterface::add_11bit_driver(CANSensor *sensor)
+{
+    if (aux_11bit_driver != nullptr) {
+        // only allow one
+        return false;
+    }
+    aux_11bit_driver = sensor;
+    return true;
+}
+
+// handler for outgoing frames for auxillary drivers
+bool CanardInterface::write_aux_frame(AP_HAL::CANFrame &out_frame, const uint32_t timeout_us)
+{
+    const uint64_t tx_deadline_us = AP_HAL::micros64() + timeout_us;
+    bool ret = false;
+    for (uint8_t iface = 0; iface < num_ifaces; iface++) {
+        if (ifaces[iface] == NULL) {
+            continue;
+        }
+        ret |= ifaces[iface]->send(out_frame, tx_deadline_us, 0) > 0;
+    }
+    return ret;
+}
+
 #endif // #if HAL_ENABLE_DRONECAN_DRIVERS

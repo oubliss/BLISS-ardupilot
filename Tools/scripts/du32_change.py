@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 """
 Parses a log file and shows how Copter's du32 changes over time
@@ -6,8 +6,6 @@ Parses a log file and shows how Copter's du32 changes over time
 AP_FLAKE8_CLEAN
 
 """
-
-from __future__ import print_function
 
 import optparse
 import sys
@@ -41,7 +39,7 @@ class DU32Change(object):
             "land_complete",
             "new_radio_frame",
             "usb_connected_unused",
-            "rc_receiver_present",
+            "rc_receiver_present_unused",
             "compass_mot",
             "motor_test",
             "initialised",

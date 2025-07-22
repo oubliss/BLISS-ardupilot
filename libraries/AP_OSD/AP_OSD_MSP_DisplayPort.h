@@ -3,6 +3,8 @@
 
 #if HAL_WITH_MSP_DISPLAYPORT
 
+#define DISPLAYPORT_WRITE_BUFFER_MAX_LEN 30
+
 class AP_OSD_MSP_DisplayPort : public AP_OSD_Backend
 {
     using AP_OSD_Backend::AP_OSD_Backend;
@@ -14,6 +16,9 @@ public:
 
     //draw given text to framebuffer
     void write(uint8_t x, uint8_t y, const char* text) override;
+    
+    //draw given text to framebuffer using INAV fonts
+    void write_INAV(uint8_t x, uint8_t y, const char* text);
 
     //flush framebuffer to screen
     void flush() override;
@@ -53,6 +58,7 @@ protected:
 
 private:
     void setup_defaults(void);
+    char displayport_write_buffer[DISPLAYPORT_WRITE_BUFFER_MAX_LEN]; // terminator
 
     AP_MSP_Telem_Backend* _displayport;
 
@@ -73,13 +79,13 @@ private:
     static const uint8_t SYM_FS = 0x99;
     static const uint8_t SYM_KMH = 0x9E;
     static const uint8_t SYM_MPH = 0x9D;
-    static const uint8_t SYM_DEGR = 0x1D;
+    static const uint8_t SYM_DEGR = 0x08;
     static const uint8_t SYM_PCNT = 0x25;
     static const uint8_t SYM_RPM = 0x12;
     static const uint8_t SYM_ASPD = 0x41;
-    static const uint8_t SYM_GSPD = 0x70;
-    static const uint8_t SYM_WSPD = 0x1B;
-    static const uint8_t SYM_VSPD = 0x7F;
+    static const uint8_t SYM_GSPD = 0x47;
+    static const uint8_t SYM_WSPD = 0x57;
+    static const uint8_t SYM_VSPD = 0x5E;
     static const uint8_t SYM_WPNO = 0x23;
     static const uint8_t SYM_WPDIR = 0xE6;
     static const uint8_t SYM_WPDST = 0xE7;
@@ -88,10 +94,10 @@ private:
 
     static const uint8_t SYM_SAT_L = 0x1E;
     static const uint8_t SYM_SAT_R = 0x1F;
-    static const uint8_t SYM_HDOP_L = 0x11;
-    static const uint8_t SYM_HDOP_R = 0x08;
+    static const uint8_t SYM_HDOP_L = 0x48;
+    static const uint8_t SYM_HDOP_R = 0x44;
 
-    static const uint8_t SYM_HOME = 0x05;
+    static const uint8_t SYM_HOME = 0x11;
     static const uint8_t SYM_WIND = 0x57;
 
     static const uint8_t SYM_ARROW_START = 0x60;
@@ -120,31 +126,45 @@ private:
 
     static const uint8_t SYM_DEGREES_C = 0x0E;
     static const uint8_t SYM_DEGREES_F = 0x0D;
-    static const uint8_t SYM_GPS_LAT = 0x68;
-    static const uint8_t SYM_GPS_LONG = 0x6C;
-    static const uint8_t SYM_ARMED = 0x08;
-    static const uint8_t SYM_DISARMED = 0x08;
+    static const uint8_t SYM_GPS_LAT = 0x89;
+    static const uint8_t SYM_GPS_LONG = 0x98;
+    static const uint8_t SYM_ARMED = 0x00;
+    static const uint8_t SYM_DISARMED = 0x2A;
     static const uint8_t SYM_ROLL0 = 0x2D;
     static const uint8_t SYM_ROLLR = 0x64;
     static const uint8_t SYM_ROLLL = 0x6C;
     static const uint8_t SYM_PTCH0 = 0x7C;
     static const uint8_t SYM_PTCHUP = 0x68;
     static const uint8_t SYM_PTCHDWN = 0x60;
-    static const uint8_t SYM_XERR = 0xEE;
+    static const uint8_t SYM_XERR = 0x21;
     static const uint8_t SYM_KN = 0xF0;
     static const uint8_t SYM_NM = 0xF1;
-    static const uint8_t SYM_DIST = 0x22;
+    static const uint8_t SYM_DIST = 0x04;
     static const uint8_t SYM_FLY = 0x9C;
     static const uint8_t SYM_EFF = 0xF2;
     static const uint8_t SYM_AH = 0xF3;
     static const uint8_t SYM_MW = 0xF4;
     static const uint8_t SYM_CLK = 0x08;
     static const uint8_t SYM_KILO = 0x4B;
-    static const uint8_t SYM_TERALT = 0xEF;
+    static const uint8_t SYM_TERALT = 0x7F;
     static const uint8_t SYM_FENCE_ENABLED = 0xF5;
     static const uint8_t SYM_FENCE_DISABLED = 0xF6;
-    static const uint8_t SYM_RNGFD = 0x72;
+    static const uint8_t SYM_RNGFD = 0x7F;
     static const uint8_t SYM_LQ = 0xF8;
+
+    static const uint8_t SYM_SIDEBAR_L_ARROW = 0x02;
+    static const uint8_t SYM_SIDEBAR_R_ARROW = 0x03;
+    static const uint8_t SYM_SIDEBAR_A = 0x13;
+    static const uint8_t SYM_SIDEBAR_B = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_C = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_D = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_E = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_F = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_G = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_H = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_I = SYM_SIDEBAR_A;
+    static const uint8_t SYM_SIDEBAR_J = SYM_SIDEBAR_A;
+
 
     static constexpr uint8_t symbols[AP_OSD_NUM_SYMBOLS] {
         SYM_M,
@@ -226,8 +246,22 @@ private:
         SYM_FENCE_DISABLED,
         SYM_RNGFD,
         SYM_LQ,
+        SYM_SIDEBAR_L_ARROW,
+        SYM_SIDEBAR_R_ARROW,
+        SYM_SIDEBAR_A,
+        SYM_SIDEBAR_B,
+        SYM_SIDEBAR_C,
+        SYM_SIDEBAR_D,
+        SYM_SIDEBAR_E,
+        SYM_SIDEBAR_F,
+        SYM_SIDEBAR_G,
+        SYM_SIDEBAR_H,
+        SYM_SIDEBAR_I,
+        SYM_SIDEBAR_J,
     };
-
+#if AP_MSP_INAV_FONTS_ENABLED
+    static const uint8_t ap_to_inav_symbols_map[256][2];
+#endif //AP_MSP_INAV_FONTS_ENABLED
     bool _blink_on;
 };
 #endif

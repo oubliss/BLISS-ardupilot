@@ -14,6 +14,9 @@
 #
 # You should have received a copy of the GNU General Public License along
 # with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+# flake8: noqa
+
 '''
 Waf tool for printing build summary. To be used, this must be loaded in the
 options(), configure() and build() functions.
@@ -190,7 +193,7 @@ def _parse_size_output(s, s_all, totals=False):
     lines = s.splitlines()[1:]
     l = []
     for line in lines:
-      if pattern.match(line) or totals==False:
+      if pattern.match(line) or totals is False:
         row = line.strip().split()
 
         # check if crash_log wasn't found

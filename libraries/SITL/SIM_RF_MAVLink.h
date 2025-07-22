@@ -15,7 +15,7 @@
 /*
   Simulator for the NMEA serial rangefinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:rf_mavlink --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:rf_mavlink --speedup=1
 
 param set SERIAL5_PROTOCOL 1
 param set RNGFND1_TYPE 10
@@ -36,10 +36,12 @@ namespace SITL {
 class RF_MAVLink : public SerialRangeFinder {
 public:
 
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_MAVLink(); }
+
     uint32_t packet_for_alt(uint16_t alt_cm, uint8_t *buffer, uint8_t buflen) override;
 
 private:
-
+    mavlink_status_t mav_status;
 };
 
 }

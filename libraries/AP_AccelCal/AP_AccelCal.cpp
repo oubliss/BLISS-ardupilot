@@ -44,9 +44,8 @@ void AP_AccelCal::update()
     if (_started) {
         update_status();
 
-        AccelCalibrator *cal;
         uint8_t num_active_calibrators = 0;
-        for(uint8_t i=0; (cal = get_calibrator(i)); i++) {
+        for(uint8_t i=0; get_calibrator(i) != nullptr; i++) {
             num_active_calibrators++;
         }
         if (num_active_calibrators != _num_active_calibrators) {
@@ -56,6 +55,7 @@ void AP_AccelCal::update()
         if(_start_collect_sample) {
             collect_sample();
         }
+        AccelCalibrator *cal;
         switch(_status) {
             case ACCEL_CAL_NOT_STARTED:
                 fail();
@@ -183,7 +183,7 @@ void AP_AccelCal::update()
     }
 }
 
-void AP_AccelCal::start(GCS_MAVLINK *gcs)
+void AP_AccelCal::start(GCS_MAVLINK *gcs, uint8_t sysid, uint8_t compid)
 {
     if (gcs == nullptr || _started) {
         return;
@@ -201,6 +201,8 @@ void AP_AccelCal::start(GCS_MAVLINK *gcs)
     _started = true;
     _saving = false;
     _gcs = gcs;
+    _sysid = sysid;
+    _compid = compid;
     _use_gcs_snoop = true;
     _last_position_request_ms = 0;
     _step = 0;
@@ -354,7 +356,6 @@ void AP_AccelCal::update_status() {
     }
 
     _status = ACCEL_CAL_SUCCESS;    // we have succeeded calibration if all the calibrators have
-    return;
 }
 
 bool AP_AccelCal::client_active(uint8_t client_num)
@@ -363,8 +364,12 @@ bool AP_AccelCal::client_active(uint8_t client_num)
 }
 
 #if HAL_GCS_ENABLED
-void AP_AccelCal::handle_command_ack(const mavlink_command_ack_t &packet)
+void AP_AccelCal::handle_command_ack(const mavlink_command_ack_t &packet, uint8_t src_sysid, uint8_t src_compid)
 {
+    if(_sysid != src_sysid || _compid != src_compid) {
+        return;
+    }
+
     if (!_waiting_for_mavlink_ack) {
         return;
     }

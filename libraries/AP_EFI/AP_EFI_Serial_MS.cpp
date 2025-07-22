@@ -43,12 +43,15 @@ void AP_EFI_Serial_MS::update()
 
     const uint32_t expected_bytes = 2 + (RT_LAST_OFFSET - RT_FIRST_OFFSET) + 4;
     if (port->available() >= expected_bytes && read_incoming_realtime_data()) {
-        last_response_ms = now;
         copy_to_frontend();
     }
 
-    if (now - last_response_ms > 100) {
+    const uint32_t last_request_delta = (now - last_request_ms);
+    const uint32_t available = port->available();
+    if (((last_request_delta > 150) && (available > 0)) || // nothing in our input buffer 150 ms after request
+        ((last_request_delta > 90)  && (available == 0))) { // we requested something over 90 ms ago, but didn't get any data
         port->discard_input();
+        last_request_ms = now;
         // Request an update from the realtime table (7).
         // The data we need start at offset 6 and ends at 129
         send_request(7, RT_FIRST_OFFSET, RT_LAST_OFFSET);
@@ -59,7 +62,7 @@ bool AP_EFI_Serial_MS::read_incoming_realtime_data()
 {
     // Data is parsed directly from the buffer, otherwise we would need to allocate
     // several hundred bytes for the entire realtime data table or request every
-    // value individiually
+    // value individually
     uint16_t message_length = 0;
 
     // reset checksum before reading new data
@@ -89,7 +92,7 @@ bool AP_EFI_Serial_MS::read_incoming_realtime_data()
         float temp_float;
         switch (offset) {
             case PW1_MSB:
-                internal_state.cylinder_status.injection_time_ms = (float)((data << 8) + read_byte_CRC32())/1000.0f;
+                internal_state.cylinder_status.injection_time_ms = (float)((data << 8) + read_byte_CRC32())*0.001f;
                 offset++;  // increment the counter because we read a byte in the previous line
                 break;
             case RPM_MSB:
@@ -98,41 +101,41 @@ bool AP_EFI_Serial_MS::read_incoming_realtime_data()
                 offset++;
                 break;
             case ADVANCE_MSB:
-                internal_state.cylinder_status.ignition_timing_deg = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                internal_state.cylinder_status.ignition_timing_deg = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 break;
             case ENGINE_BM:
                 break;
             case BAROMETER_MSB:
-                internal_state.atmospheric_pressure_kpa = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                internal_state.atmospheric_pressure_kpa = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 break;
             case MAP_MSB:
-                internal_state.intake_manifold_pressure_kpa = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                internal_state.intake_manifold_pressure_kpa = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 break;
             case MAT_MSB:
-                temp_float = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                temp_float = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 internal_state.intake_manifold_temperature = degF_to_Kelvin(temp_float);
                 break;
             case CHT_MSB:
-                temp_float = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                temp_float = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 internal_state.cylinder_status.cylinder_head_temperature = degF_to_Kelvin(temp_float);
                 break;
             case TPS_MSB:
-                temp_float = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                temp_float = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 internal_state.throttle_position_percent = roundf(temp_float);
                 break;
             case AFR1_MSB:
-                temp_float = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                temp_float = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 offset++;
                 internal_state.cylinder_status.lambda_coefficient = temp_float;
                 break;
             case DWELL_MSB:
-                temp_float = (float)((data << 8) + read_byte_CRC32())/10.0f;
+                temp_float = (float)((data << 8) + read_byte_CRC32())*0.1f;
                 internal_state.spark_dwell_time_ms = temp_float;
                 offset++;
                 break;

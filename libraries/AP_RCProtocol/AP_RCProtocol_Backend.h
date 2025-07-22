@@ -39,14 +39,15 @@ public:
     uint8_t num_channels() const;
 
     // support for receivers that have FC initiated bind support
-    virtual void start_bind(void) {}
+    virtual void start_bind() {}
 
     // allow for backends that need regular polling
     virtual void update(void) {}
-    enum {
-        PARSE_TYPE_SIGREAD,
-        PARSE_TYPE_SERIAL
-    };
+
+    // update from mavlink messages
+#if AP_RCPROTOCOL_MAVLINK_RADIO_ENABLED
+    virtual void update_radio_rc_channels(const mavlink_radio_rc_channels_t* packet) {}
+#endif
 
     // get number of frames, ignoring failsafe
     uint32_t get_rc_frame_count(void) const {
@@ -65,6 +66,10 @@ public:
 
     uint32_t get_rc_protocols_mask(void) const {
         return frontend.rc_protocols_mask;
+    }
+
+    bool protocol_enabled(enum AP_RCProtocol::rcprotocol_t protocol) const {
+        return frontend.protocol_enabled(protocol);
     }
 
     // get RSSI
@@ -95,6 +100,10 @@ public:
         return true;
     }
 
+    bool is_detected() const {
+        return frontend._detected_protocol != AP_RCProtocol::NONE && frontend.backend[frontend._detected_protocol] == this;
+    }
+
 #if AP_VIDEOTX_ENABLED
     // called by static methods to confiig video transmitters:
     static void configure_vtx(uint8_t band, uint8_t channel, uint8_t power, uint8_t pitmode);
@@ -122,7 +131,7 @@ protected:
     void log_data(AP_RCProtocol::rcprotocol_t prot, uint32_t timestamp, const uint8_t *data, uint8_t len) const;
 
     // decode channels from the standard 11bit format (used by CRSF and SBUS)
-    void decode_11bit_channels(const uint8_t* data, uint8_t nchannels, uint16_t *values, uint16_t mult, uint16_t div, uint16_t offset);
+    static void decode_11bit_channels(const uint8_t* data, uint8_t nchannels, uint16_t *values, uint16_t mult, uint16_t div, uint16_t offset);
 
 private:
     uint32_t rc_input_count;

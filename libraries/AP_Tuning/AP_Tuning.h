@@ -1,5 +1,9 @@
 #pragma once
 
+#include "AP_Tuning_config.h"
+
+#if AP_TUNING_ENABLED
+
 #include <AP_Param/AP_Param.h>
 
 #include "stdint.h"
@@ -60,6 +64,9 @@ private:
 
     uint32_t last_check_ms;
 
+    // last tuning value scaled
+    float old_value;
+    
     void Log_Write_Parameter_Tuning(float value);
     
     // the parameter we are tuning
@@ -100,3 +107,5 @@ protected:
     // parmset is in vehicle subclass var table
     AP_Int16 parmset;
 };
+
+#endif  // AP_TUNING_ENABLED

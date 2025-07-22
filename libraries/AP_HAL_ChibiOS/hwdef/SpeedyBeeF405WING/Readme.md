@@ -12,7 +12,7 @@ The SpeedyBeeF405WING is a flight controller produced by [SpeedyBee](http://www.
     Power
         2S - 6S Lipo input voltage with voltage monitoring
         90A Cont., 215A peak current monitor
-        9V/12/5V, 1.8A BEC for powering Video Transmitter
+        9V/12/5V, 1.8A BEC for powering Video Transmitter controlled by GPIO
         4.9V/6V/7.2V, 4.5A BEC for servos
         5V, 2.4A BEC for internal and peripherals
     Interfaces
@@ -74,8 +74,8 @@ to use DShot.
 
 ## Battery Monitoring
 
-The board has a builting voltage and current sensor. The current
-sensor can read up to 90A continuosly, 215 Amps peak. The voltage sensor can handle up to 6S
+The board has a built-in voltage and current sensor. The current
+sensor can read up to 90A continuously, 215 Amps peak. The voltage sensor can handle up to 6S
 LiPo batteries.
 
 The correct battery setting parameters are set by default and are:
@@ -89,6 +89,10 @@ The correct battery setting parameters are set by default and are:
 ## Compass
 
 The SpeedyBeeF405Wing does not have a built-in compass, but you can attach an external compass using I2C on the SDA and SCL pads.
+
+## VTX power control
+
+GPIO 81 controls the VTX BEC output to pins marked "9V". Setting this GPIO high removes voltage supply to pins.
 
 ## Loading Firmware
 Firmware for these boards can be found at https://firmware.ardupilot.org in sub-folders labeled “SpeedyBeeF405Wing”.

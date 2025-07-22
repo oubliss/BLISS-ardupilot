@@ -17,7 +17,7 @@ const AP_HAL::HAL& hal = AP_HAL::get_HAL();
 static AP_BoardConfig board_config;
 static AP_SerialManager serial_manager;
 AP_Int32 logger_bitmask;
-static AP_Logger logger{logger_bitmask};
+static AP_Logger logger;
 static AP_RTC _rtc;
 
 void setup(void)
@@ -115,9 +115,6 @@ void loop(void)
     hal.console->printf("Test complete.\n\n");
 }
 
-const struct AP_Param::GroupInfo        GCS_MAVLINK_Parameters::var_info[] = {
-    AP_GROUPEND
-};
 GCS_Dummy _gcs;
 
 AP_HAL_MAIN();

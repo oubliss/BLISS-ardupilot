@@ -67,10 +67,6 @@
 # define FS_EKF_THRESHOLD_DEFAULT      0.8f    // EKF failsafe's default compass and velocity variance threshold above which the EKF failsafe will be triggered
 #endif
 
-#ifndef EKF_ORIGIN_MAX_DIST_M
-# define EKF_ORIGIN_MAX_DIST_M         50000   // EKF origin and waypoints (including home) must be within 50km
-#endif
-
 //////////////////////////////////////////////////////////////////////////////
 // FLIGHT_MODE
 //
@@ -111,13 +107,6 @@
 # define AUTO_DISARMING_DELAY  10
 #endif
 
-//////////////////////////////////////////////////////////////////////////////
-// Logging control
-//
-#ifndef LOGGING_ENABLED
-# define LOGGING_ENABLED                ENABLED
-#endif
-
 // Default logging bitmask
 #ifndef DEFAULT_LOG_BITMASK
 # define DEFAULT_LOG_BITMASK \
@@ -139,10 +128,6 @@
 
 #ifndef CH_MODE_DEFAULT
 # define CH_MODE_DEFAULT   5
-#endif
-
-#ifndef STATS_ENABLED
-# define STATS_ENABLED ENABLED
 #endif
 
 #ifndef HAL_FRAME_TYPE_DEFAULT

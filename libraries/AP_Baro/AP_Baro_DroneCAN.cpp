@@ -21,18 +21,13 @@ AP_Baro_DroneCAN::AP_Baro_DroneCAN(AP_Baro &baro) :
     AP_Baro_Backend(baro)
 {}
 
-void AP_Baro_DroneCAN::subscribe_msgs(AP_DroneCAN* ap_dronecan)
+bool AP_Baro_DroneCAN::subscribe_msgs(AP_DroneCAN* ap_dronecan)
 {
-    if (ap_dronecan == nullptr) {
-        return;
-    }
-    if (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_pressure, ap_dronecan->get_driver_index()) == nullptr) {
-        AP_BoardConfig::allocation_error("pressure_sub");
-    }
+    const auto driver_index = ap_dronecan->get_driver_index();
 
-    if (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_temperature, ap_dronecan->get_driver_index()) == nullptr) {
-        AP_BoardConfig::allocation_error("temperature_sub");
-    }
+    return (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_pressure, driver_index) != nullptr)
+        && (Canard::allocate_sub_arg_callback(ap_dronecan, &handle_temperature, driver_index) != nullptr)
+    ;
 }
 
 AP_Baro_Backend* AP_Baro_DroneCAN::probe(AP_Baro &baro)
@@ -42,7 +37,7 @@ AP_Baro_Backend* AP_Baro_DroneCAN::probe(AP_Baro &baro)
     AP_Baro_DroneCAN* backend = nullptr;
     for (uint8_t i = 0; i < BARO_MAX_DRIVERS; i++) {
         if (_detected_modules[i].driver == nullptr && _detected_modules[i].ap_dronecan != nullptr) {
-            backend = new AP_Baro_DroneCAN(baro);
+            backend = NEW_NOTHROW AP_Baro_DroneCAN(baro);
             if (backend == nullptr) {
                 AP::can().log_text(AP_CANManager::LOG_ERROR,
                             LOG_TAG,
@@ -88,7 +83,7 @@ AP_Baro_DroneCAN* AP_Baro_DroneCAN::get_dronecan_backend(AP_DroneCAN* ap_droneca
     
     if (create_new) {
         bool already_detected = false;
-        //Check if there's an empty spot for possible registeration
+        //Check if there's an empty spot for possible registration
         for (uint8_t i = 0; i < BARO_MAX_DRIVERS; i++) {
             if (_detected_modules[i].ap_dronecan == ap_dronecan && _detected_modules[i].node_id == node_id) {
                 //Already Detected

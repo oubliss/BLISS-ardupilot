@@ -1,6 +1,8 @@
 #define AP_INLINE_VECTOR_OPS
 
 #include <AP_HAL/AP_HAL.h>
+#include <AP_AHRS/AP_AHRS.h>
+#include "AP_InertialSensor_rate_config.h"
 #include "AP_InertialSensor.h"
 #include "AP_InertialSensor_Backend.h"
 #include <AP_Logger/AP_Logger.h>
@@ -10,11 +12,11 @@
 #endif
 #include <stdio.h>
 
-#define SENSOR_RATE_DEBUG 0
-
 #ifndef AP_HEATER_IMU_INSTANCE
 #define AP_HEATER_IMU_INSTANCE 0
 #endif
+
+#define PRIMARY_UPDATE_TIMEOUT_US 200000UL    // continue to notify the primary at 5Hz
 
 const extern AP_HAL::HAL& hal;
 
@@ -51,6 +53,15 @@ void AP_InertialSensor_Backend::_set_accel_oversampling(uint8_t instance, uint8_
 void AP_InertialSensor_Backend::_set_gyro_oversampling(uint8_t instance, uint8_t n)
 {
     _imu._gyro_over_sampling[instance] = n;
+}
+
+/*
+  while sensors are converging to get the true sample rate we re-init the notch filters.
+  stop doing this if the user arms
+ */
+bool AP_InertialSensor_Backend::sensors_converging() const
+{
+    return AP_HAL::millis64() < HAL_INS_CONVERGANCE_MS && !hal.util->get_soft_armed();
 }
 
 /*
@@ -163,7 +174,7 @@ void AP_InertialSensor_Backend::_rotate_and_correct_gyro(uint8_t instance, Vecto
  */
 void AP_InertialSensor_Backend::_publish_gyro(uint8_t instance, const Vector3f &gyro) /* front end */
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     _imu._gyro[instance] = gyro;
@@ -211,22 +222,20 @@ void AP_InertialSensor_Backend::apply_gyro_filters(const uint8_t instance, const
     save_gyro_window(instance, gyro, filter_phase++);
 
     Vector3f gyro_filtered = gyro;
-
+#if AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
     // apply the harmonic notch filters
     for (auto &notch : _imu.harmonic_notches) {
         if (!notch.params.enabled()) {
             continue;
         }
         bool inactive = notch.is_inactive();
-#ifndef HAL_BUILD_AP_PERIPH
         // by default we only run the expensive notch filters on the
         // currently active IMU we reset the inactive notch filters so
         // that if we switch IMUs we're not left with old data
         if (!notch.params.hasOption(HarmonicNotchFilterParams::Options::EnableOnAllIMUs) &&
-            instance != AP::ahrs().get_primary_gyro_index()) {
+            instance != _imu._primary) {
             inactive = true;
         }
-#endif
         if (inactive) {
             // while inactive we reset the filter so when it activates the first output
             // will be the first input sample
@@ -236,6 +245,7 @@ void AP_InertialSensor_Backend::apply_gyro_filters(const uint8_t instance, const
         }
         save_gyro_window(instance, gyro_filtered, filter_phase++);
     }
+#endif  // AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
 
     // apply the low pass filter last to attenuate any notch induced noise
     gyro_filtered = _imu._gyro_filter[instance].apply(gyro_filtered);
@@ -246,19 +256,33 @@ void AP_InertialSensor_Backend::apply_gyro_filters(const uint8_t instance, const
 #if HAL_GYROFFT_ENABLED
         _imu._post_filter_gyro_filter[instance].reset();
 #endif
+#if AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
         for (auto &notch : _imu.harmonic_notches) {
             notch.filter[instance].reset();
+        }
+#endif
+        gyro_filtered = _imu._gyro_filtered[instance];
+    }
+
+#if AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED
+    if (_imu.is_rate_loop_gyro_enabled(instance)) {
+        if (_imu.push_next_gyro_sample(gyro_filtered)) {
+            // if we used the value, record it for publication to the front-end
+            _imu._gyro_filtered[instance] = gyro_filtered;
         }
     } else {
         _imu._gyro_filtered[instance] = gyro_filtered;
     }
+#else
+    _imu._gyro_filtered[instance] = gyro_filtered;
+#endif
 }
 
 void AP_InertialSensor_Backend::_notify_new_gyro_raw_sample(uint8_t instance,
                                                             const Vector3f &gyro,
                                                             uint64_t sample_us)
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     float dt;
@@ -343,17 +367,8 @@ void AP_InertialSensor_Backend::_notify_new_gyro_raw_sample(uint8_t instance,
     }
 
     // 5us
-#if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
-    if (!_imu.batchsampler.doing_post_filter_logging()) {
-        log_gyro_raw(instance, sample_us, gyro);
-    }
-    else {
-        log_gyro_raw(instance, sample_us, _imu._gyro_filtered[instance]);
-    }
-#else
-    // assume pre-filter logging if batchsampler is not enabled
-    log_gyro_raw(instance, sample_us, gyro);
-#endif
+    log_gyro_raw(instance, sample_us, gyro, _imu._gyro_filtered[instance]);
+    update_primary();
 }
 
 /*
@@ -365,7 +380,7 @@ void AP_InertialSensor_Backend::_notify_new_gyro_raw_sample(uint8_t instance,
  */
 void AP_InertialSensor_Backend::_notify_new_delta_angle(uint8_t instance, const Vector3f &dangle)
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     float dt;
@@ -440,20 +455,11 @@ void AP_InertialSensor_Backend::_notify_new_delta_angle(uint8_t instance, const 
         _imu._new_gyro_data[instance] = true;
     }
 
-#if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
-    if (!_imu.batchsampler.doing_post_filter_logging()) {
-        log_gyro_raw(instance, sample_us, gyro);
-    }
-    else {
-        log_gyro_raw(instance, sample_us, _imu._gyro_filtered[instance]);
-    }
-#else
-    // assume we're doing pre-filter logging:
-    log_gyro_raw(instance, sample_us, gyro);
-#endif
+    log_gyro_raw(instance, sample_us, gyro, _imu._gyro_filtered[instance]);
+    update_primary();
 }
 
-void AP_InertialSensor_Backend::log_gyro_raw(uint8_t instance, const uint64_t sample_us, const Vector3f &gyro)
+void AP_InertialSensor_Backend::log_gyro_raw(uint8_t instance, const uint64_t sample_us, const Vector3f &raw_gyro, const Vector3f &filtered_gyro)
 {
 #if HAL_LOGGING_ENABLED
     AP_Logger *logger = AP_Logger::get_singleton();
@@ -461,12 +467,36 @@ void AP_InertialSensor_Backend::log_gyro_raw(uint8_t instance, const uint64_t sa
         // should not have been called
         return;
     }
-    if (should_log_imu_raw()) {
-        Write_GYR(instance, sample_us, gyro);
+
+#if AP_AHRS_ENABLED
+    const bool log_because_primary_gyro = _imu.raw_logging_option_set(AP_InertialSensor::RAW_LOGGING_OPTION::PRIMARY_GYRO_ONLY) && (instance == _imu._primary);
+#else
+    const bool log_because_primary_gyro = false;
+#endif
+
+    if (_imu.raw_logging_option_set(AP_InertialSensor::RAW_LOGGING_OPTION::ALL_GYROS) ||
+        log_because_primary_gyro ||
+        should_log_imu_raw()) {
+
+        if (_imu.raw_logging_option_set(AP_InertialSensor::RAW_LOGGING_OPTION::PRE_AND_POST_FILTER)) {
+            // Both pre and post, offset post instance as batch sampler does
+            Write_GYR(instance, sample_us, raw_gyro);
+            Write_GYR(instance + _imu._gyro_count, sample_us, filtered_gyro);
+
+        } else if (_imu.raw_logging_option_set(AP_InertialSensor::RAW_LOGGING_OPTION::POST_FILTER)) {
+            // Just post
+            Write_GYR(instance, sample_us, filtered_gyro);
+
+        } else {
+            // Just pre
+            Write_GYR(instance, sample_us, raw_gyro);
+
+        }
     } else {
 #if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
         if (!_imu.batchsampler.doing_sensor_rate_logging()) {
-            _imu.batchsampler.sample(instance, AP_InertialSensor::IMU_SENSOR_TYPE_GYRO, sample_us, gyro);
+            _imu.batchsampler.sample(instance, AP_InertialSensor::IMU_SENSOR_TYPE_GYRO, sample_us,
+                                     !_imu.batchsampler.doing_post_filter_logging() ? raw_gyro : filtered_gyro);
         }
 #endif
     }
@@ -478,7 +508,7 @@ void AP_InertialSensor_Backend::log_gyro_raw(uint8_t instance, const uint64_t sa
  */
 void AP_InertialSensor_Backend::_publish_accel(uint8_t instance, const Vector3f &accel) /* front end */
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     _imu._accel[instance] = accel;
@@ -508,7 +538,7 @@ void AP_InertialSensor_Backend::_notify_new_accel_raw_sample(uint8_t instance,
                                                              uint64_t sample_us,
                                                              bool fsync_set)
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     float dt;
@@ -595,7 +625,7 @@ void AP_InertialSensor_Backend::_notify_new_accel_raw_sample(uint8_t instance,
  */
 void AP_InertialSensor_Backend::_notify_new_delta_velocity(uint8_t instance, const Vector3f &dvel)
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     float dt;
@@ -664,23 +694,32 @@ void AP_InertialSensor_Backend::_notify_new_delta_velocity(uint8_t instance, con
 }
 
 
-void AP_InertialSensor_Backend::_notify_new_accel_sensor_rate_sample(uint8_t instance, const Vector3f &accel)
+void AP_InertialSensor_Backend::_notify_new_accel_sensor_rate_sample(uint8_t instance, const Vector3f &_accel)
 {
 #if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
     if (!_imu.batchsampler.doing_sensor_rate_logging()) {
         return;
     }
+
+    // get batch sampling in correct orientation
+    Vector3f accel = _accel;
+    accel.rotate(_imu._accel_orientation[instance]);
 
     _imu.batchsampler.sample(instance, AP_InertialSensor::IMU_SENSOR_TYPE_ACCEL, AP_HAL::micros64(), accel);
 #endif
 }
 
-void AP_InertialSensor_Backend::_notify_new_gyro_sensor_rate_sample(uint8_t instance, const Vector3f &gyro)
+void AP_InertialSensor_Backend::_notify_new_gyro_sensor_rate_sample(uint8_t instance, const Vector3f &_gyro)
 {
 #if AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED
     if (!_imu.batchsampler.doing_sensor_rate_logging()) {
         return;
     }
+
+    // get batch sampling in correct orientation
+    Vector3f gyro = _gyro;
+    gyro.rotate(_imu._gyro_orientation[instance]);
+
     _imu.batchsampler.sample(instance, AP_InertialSensor::IMU_SENSOR_TYPE_GYRO, AP_HAL::micros64(), gyro);
 #endif
 }
@@ -705,12 +744,6 @@ void AP_InertialSensor_Backend::log_accel_raw(uint8_t instance, const uint64_t s
 #endif
 }
 
-void AP_InertialSensor_Backend::_set_accel_max_abs_offset(uint8_t instance,
-                                                          float max_offset)
-{
-    _imu._accel_max_abs_offsets[instance] = max_offset;
-}
-
 // increment accelerometer error_count
 void AP_InertialSensor_Backend::_inc_accel_error_count(uint8_t instance)
 {
@@ -728,7 +761,7 @@ void AP_InertialSensor_Backend::_inc_gyro_error_count(uint8_t instance)
  */
 void AP_InertialSensor_Backend::_publish_temperature(uint8_t instance, float temperature) /* front end */
 {
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     _imu._temperature[instance] = temperature;
@@ -751,9 +784,10 @@ void AP_InertialSensor_Backend::update_gyro(uint8_t instance) /* front end */
 {    
     WITH_SEMAPHORE(_sem);
 
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
+
     if (_imu._new_gyro_data[instance]) {
         _publish_gyro(instance, _imu._gyro_filtered[instance]);
 #if HAL_GYROFFT_ENABLED
@@ -763,6 +797,29 @@ void AP_InertialSensor_Backend::update_gyro(uint8_t instance) /* front end */
         _imu._new_gyro_data[instance] = false;
     }
 
+    update_gyro_filters(instance);
+}
+
+void AP_InertialSensor_Backend::update_primary()
+{
+    // timing changes need to be made in the bus thread in order to take effect which is
+    // why they are actioned here. Currently the primary gyro and  primary accel can never
+    // be different for a particular IMU
+    const bool is_new_primary = (gyro_instance == _imu._primary);
+    uint32_t now_us = AP_HAL::micros();
+    if (is_primary != is_new_primary
+        || AP_HAL::timeout_expired(last_primary_update_us, now_us, PRIMARY_UPDATE_TIMEOUT_US)) {
+        set_primary(is_new_primary);
+        is_primary = is_new_primary;
+        last_primary_update_us = now_us;
+    }
+}
+
+/*
+  propagate filter changes from front end to backend
+ */
+void AP_InertialSensor_Backend::update_gyro_filters(uint8_t instance) /* front end */
+{
     // possibly update filter frequency
     const float gyro_rate = _gyro_raw_sample_rate(instance);
 
@@ -774,11 +831,13 @@ void AP_InertialSensor_Backend::update_gyro(uint8_t instance) /* front end */
         _last_gyro_filter_hz = _gyro_filter_cutoff();
     }
 
+#if AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED
     for (auto &notch : _imu.harmonic_notches) {
         if (notch.params.enabled()) {
             notch.update_params(instance, sensors_converging(), gyro_rate);
         }
     }
+#endif
 }
 
 /*
@@ -788,14 +847,22 @@ void AP_InertialSensor_Backend::update_accel(uint8_t instance) /* front end */
 {    
     WITH_SEMAPHORE(_sem);
 
-    if ((1U<<instance) & _imu.imu_kill_mask) {
+    if (has_been_killed(instance)) {
         return;
     }
     if (_imu._new_accel_data[instance]) {
         _publish_accel(instance, _imu._accel_filtered[instance]);
         _imu._new_accel_data[instance] = false;
     }
-    
+
+    update_accel_filters(instance);
+}
+
+/*
+  propagate filter changes from front end to backend
+ */
+void AP_InertialSensor_Backend::update_accel_filters(uint8_t instance) /* front end */
+{
     // possibly update filter frequency
     if (_last_accel_filter_hz != _accel_filter_cutoff()) {
         _imu._accel_filter[instance].set_cutoff_frequency(_accel_raw_sample_rate(instance), _accel_filter_cutoff());
@@ -803,6 +870,7 @@ void AP_InertialSensor_Backend::update_accel(uint8_t instance) /* front end */
     }
 }
 
+#if HAL_LOGGING_ENABLED
 bool AP_InertialSensor_Backend::should_log_imu_raw() const
 {
     if (_imu._log_raw_bit == (uint32_t)-1) {
@@ -818,11 +886,19 @@ bool AP_InertialSensor_Backend::should_log_imu_raw() const
     }
     return true;
 }
+#endif  // HAL_LOGGING_ENABLED
 
 // log an unexpected change in a register for an IMU
 void AP_InertialSensor_Backend::log_register_change(uint32_t bus_id, const AP_HAL::Device::checkreg &reg)
 {
 #if HAL_LOGGING_ENABLED
+// @LoggerMessage: IREG
+// @Description: IMU Register unexpected value change
+// @Field: TimeUS: Time since system startup
+// @Field: DevID: bus ID
+// @Field: Bank: device register bank
+// @Field: Reg: device register
+// @Field: Val: unexpected value
     AP::logger().Write("IREG", "TimeUS,DevID,Bank,Reg,Val", "QIBBB",
                        AP_HAL::micros64(),
                        bus_id,

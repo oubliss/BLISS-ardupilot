@@ -7,7 +7,7 @@
 #if CONFIG_HAL_BOARD == HAL_BOARD_ESP32
 
 
-float rand_float(void)
+static float sim_rand_float(void)
 {
     return ((((unsigned)random()) % 2000000) - 1.0e6) / 1.0e6;
 }
@@ -26,7 +26,7 @@ AP_InertialSensor_NONE::AP_InertialSensor_NONE(AP_InertialSensor &imu, const uin
  */
 AP_InertialSensor_Backend *AP_InertialSensor_NONE::detect(AP_InertialSensor &_imu, const uint16_t sample_rates[])
 {
-    AP_InertialSensor_NONE *sensor = new AP_InertialSensor_NONE(_imu, sample_rates);
+    AP_InertialSensor_NONE *sensor = NEW_NOTHROW AP_InertialSensor_NONE(_imu, sample_rates);
     if (sensor == nullptr) {
 
         return nullptr;
@@ -56,7 +56,7 @@ void AP_InertialSensor_NONE::accumulate()
 
 // calculate a noisy noise component
 static float calculate_noise(float noise, float noise_variation) {
-    return noise * (1.0f + noise_variation * rand_float());
+    return noise * (1.0f + noise_variation * sim_rand_float());
 }
 
 /*
@@ -81,9 +81,9 @@ void AP_InertialSensor_NONE::generate_accel()
         // this smears the individual motor peaks somewhat emulating physical motors
         //float freq_variation = 0.12f;
         // add in sensor noise
-        xAccel += accel_noise * rand_float();
-        yAccel += accel_noise * rand_float();
-        zAccel += accel_noise * rand_float();
+        xAccel += accel_noise * sim_rand_float();
+        yAccel += accel_noise * sim_rand_float();
+        zAccel += accel_noise * sim_rand_float();
 
         bool motors_on = 1; 
 
@@ -99,9 +99,9 @@ void AP_InertialSensor_NONE::generate_accel()
 
         if (vibe_freq.is_zero()) {
             // no rpm noise, so add in background noise if any
-            xAccel += accel_noise * rand_float();
-            yAccel += accel_noise * rand_float();
-            zAccel += accel_noise * rand_float();
+            xAccel += accel_noise * sim_rand_float();
+            yAccel += accel_noise * sim_rand_float();
+            zAccel += accel_noise * sim_rand_float();
         }
 
         if (!vibe_freq.is_zero() && motors_on) {
@@ -184,21 +184,21 @@ void AP_InertialSensor_NONE::generate_gyro()
         float r = radians(0.01) + gyro_drift();
 
         // minimum gyro noise is less than 1 bit
-        float gyro_noise = ToRad(0.04f);
+        float gyro_noise = radians(0.04f);
         float noise_variation = 0.05f;
         // this smears the individual motor peaks somewhat emulating physical motors
         float freq_variation = 0.12f;
         // add in sensor noise
-        p += gyro_noise * rand_float();
-        q += gyro_noise * rand_float();
-        r += gyro_noise * rand_float();
+        p += gyro_noise * sim_rand_float();
+        q += gyro_noise * sim_rand_float();
+        r += gyro_noise * sim_rand_float();
 
         bool motors_on = 1;
         // on a real 180mm copter gyro noise varies between 0.2-0.4 rad/s for throttle 0.2-0.8
         // giving a gyro noise variation of 0.33 rad/s or 20deg/s over the full throttle range
         if (motors_on) {
             // add extra noise when the motors are on
-            gyro_noise = ToRad(0.01) * 0.01;
+            gyro_noise = radians(0.01) * 0.01;
         }
 
         // VIB_FREQ is a static vibration applied to each axis
@@ -206,9 +206,9 @@ void AP_InertialSensor_NONE::generate_gyro()
 
         if ( vibe_freq.is_zero() ) {
             // no rpm noise, so add in background noise if any
-            p += gyro_noise * rand_float();
-            q += gyro_noise * rand_float();
-            r += gyro_noise * rand_float();
+            p += gyro_noise * sim_rand_float();
+            q += gyro_noise * sim_rand_float();
+            r += gyro_noise * sim_rand_float();
         }
 
         if (!vibe_freq.is_zero() && motors_on) {
@@ -255,17 +255,10 @@ void AP_InertialSensor_NONE::generate_gyro()
 
 void AP_InertialSensor_NONE::timer_update(void)
 {
-
     uint64_t now = AP_HAL::micros64();
 
-    static uint64_t last_msg_sent = 0;
-    if (now > last_msg_sent + 2000000) { //2sec= 2000ms = 2000000us
-        //gcs().send_text(MAV_SEVERITY_WARNING, "NO IMU FOUND");
-        DEV_PRINTF("INS: NO IMU FOUND\n");
-        last_msg_sent = now;
-    }
     if (now >= next_accel_sample) {
-        if (((1U << accel_instance) ) == 0) {
+        {
             generate_accel();
             if (next_accel_sample == 0) {
                 next_accel_sample = now + 1000000UL / accel_sample_hz;
@@ -277,7 +270,7 @@ void AP_InertialSensor_NONE::timer_update(void)
         }
     }
     if (now >= next_gyro_sample) {
-        if (((1U << gyro_instance) ) == 0) {
+        {
             generate_gyro();
             if (next_gyro_sample == 0) {
                 next_gyro_sample = now + 1000000UL / gyro_sample_hz;
@@ -296,9 +289,9 @@ float AP_InertialSensor_NONE::gyro_drift(void)
     double period  = 0.01 * 2;
     double minutes = fmod(AP_HAL::micros64() / 60.0e6, period);
     if (minutes < period/2) {
-        return minutes * ToRad(0.01);
+        return minutes * radians(0.01);
     }
-    return (period - minutes) * ToRad(0.01);
+    return (period - minutes) * radians(0.01);
 }
 
 

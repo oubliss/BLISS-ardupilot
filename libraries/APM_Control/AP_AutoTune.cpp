@@ -28,6 +28,7 @@
 #include <AC_PID/AC_PID.h>
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <GCS_MAVLink/GCS.h>
+#include <AP_InertialSensor/AP_InertialSensor.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -152,7 +153,12 @@ void AP_AutoTune::stop(void)
 
 const char *AP_AutoTune::axis_string(void) const
 {
-    switch (type) {
+    return axis_string(type);
+}
+
+const char *AP_AutoTune::axis_string(ATType _type)
+{
+    switch (_type) {
     case AUTOTUNE_ROLL:
         return "Roll";
     case AUTOTUNE_PITCH:
@@ -179,7 +185,7 @@ void AP_AutoTune::update(AP_PIDInfo &pinfo, float scaler, float angle_err_deg)
     // filter actuator without I term so we can take ratios without
     // accounting for trim offsets. We first need to include the I and
     // clip to 45 degrees to get the right value of the real surface
-    const float clipped_actuator = constrain_float(pinfo.FF + pinfo.P + pinfo.D + pinfo.I, -45, 45) - pinfo.I;
+    const float clipped_actuator = constrain_float(pinfo.FF + pinfo.P + pinfo.D + pinfo.DFF + pinfo.I, -45, 45) - pinfo.I;
     const float actuator = actuator_filter.apply(clipped_actuator);
     const float actual_rate = rate_filter.apply(pinfo.actual);
 
@@ -208,10 +214,10 @@ void AP_AutoTune::update(AP_PIDInfo &pinfo, float scaler, float angle_err_deg)
     float att_limit_deg = 0;
     switch (type) {
     case AUTOTUNE_ROLL:
-        att_limit_deg = aparm.roll_limit_cd * 0.01;
+        att_limit_deg = aparm.roll_limit;
         break;
     case AUTOTUNE_PITCH:
-        att_limit_deg = MIN(abs(aparm.pitch_limit_max_cd),abs(aparm.pitch_limit_min_cd))*0.01;
+        att_limit_deg = MIN(abs(aparm.pitch_limit_max*100),abs(aparm.pitch_limit_min*100))*0.01;
         break;
     case AUTOTUNE_YAW:
         // arbitrary value for yaw angle
@@ -247,9 +253,10 @@ void AP_AutoTune::update(AP_PIDInfo &pinfo, float scaler, float angle_err_deg)
 
     const uint32_t now = AP_HAL::millis();
 
+#if HAL_LOGGING_ENABLED
     if (now - last_log_ms >= 40) {
         // log at 25Hz
-        struct log_ATRP pkt = {
+        const struct log_ATRP pkt {
             LOG_PACKET_HEADER_INIT(LOG_ATRP_MSG),
             time_us : AP_HAL::micros64(),
             type : uint8_t(type),
@@ -269,6 +276,7 @@ void AP_AutoTune::update(AP_PIDInfo &pinfo, float scaler, float angle_err_deg)
         AP::logger().WriteBlock(&pkt, sizeof(pkt));
         last_log_ms = now;
     }
+#endif
 
     if (new_state == state) {
         if (state == ATState::IDLE &&
@@ -556,7 +564,7 @@ void AP_AutoTune::update_rmax(void)
 
     if (level == 0) {
         // this level means to keep current values of RMAX and TCONST
-        target_rmax = constrain_float(current.rmax_pos, 75, 720);
+        target_rmax = constrain_float(current.rmax_pos, 20, 720);
         target_tau = constrain_float(current.tau, 0.1, 2);
     } else {
         target_rmax = tuning_table[level-1].rmax;

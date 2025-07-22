@@ -15,13 +15,13 @@ public:
 
     void update() override;
 
-    static void subscribe_msgs(AP_DroneCAN* ap_dronecan);
+    static bool subscribe_msgs(AP_DroneCAN* ap_dronecan);
 
     static void handle_measurement(AP_DroneCAN *ap_dronecan, const CanardRxTransfer& transfer, const com_hex_equipment_flow_Measurement &msg);
 
 private:
 
-    Vector2f flowRate, bodyRate;
+    Vector2f flow_integral, rate_gyro_integral;
     uint8_t surface_quality;
     float integral_time;
     bool new_data;

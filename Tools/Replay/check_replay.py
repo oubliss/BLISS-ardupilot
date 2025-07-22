@@ -1,10 +1,10 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+# flake8: noqa
 
 '''
 check that replay produced identical results
 '''
-
-from __future__ import print_function
 
 def check_log(logfile, progress=print, ekf2_only=False, ekf3_only=False, verbose=False, accuracy=0.0, ignores=set()):
     '''check replay log for matching output'''
@@ -40,7 +40,7 @@ def check_log(logfile, progress=print, ekf2_only=False, ekf3_only=False, verbose
         if not hasattr(m,'C'):
             continue
         mtype = m.get_type()
-        if not mtype in counts:
+        if mtype not in counts:
             counts[mtype] = 0
             base_counts[mtype] = 0
         core = m.C

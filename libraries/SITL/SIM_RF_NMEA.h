@@ -15,7 +15,7 @@
 /*
   Simulator for the NMEA serial rangefinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:nmea --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:nmea --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set SERIAL5_BAUD 9600
@@ -36,6 +36,8 @@ namespace SITL {
 
 class RF_NMEA : public SerialRangeFinder {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_NMEA(); }
 
     uint32_t device_baud() const override { return 9600; }
 

@@ -5,7 +5,8 @@
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_BH ||           \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_DARK ||         \
     CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_PXFMINI ||      \
-    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_OBAL_V1 ||      \
+    CONFIG_HAL_BOARD_SUBTYPE == HAL_BOARD_SUBTYPE_LINUX_CANZERO
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -289,7 +290,7 @@ void RCInput_RPI::set_physical_addresses()
         clk_base = RCIN_RPI_RPI4_CLK_BASE;
         pcm_base = RCIN_RPI_RPI4_PCM_BASE;
     } else {
-        fprintf(stderr,"Unknown Linux Board version!\n");
+        fprintf(stderr,"Unknown Linux Board version: %i\n", int(_version));
         exit(-1);
     }
 }
@@ -533,8 +534,8 @@ void RCInput_RPI::init()
     set_physical_addresses();
     // Init memory for buffer and for DMA control blocks.
     // See comments in "init_ctrl_data()" to understand values "2" and "15"
-    circle_buffer = new Memory_table(RCIN_RPI_BUFFER_LENGTH * 2, _version);
-    con_blocks = new Memory_table(RCIN_RPI_BUFFER_LENGTH * 15, _version);
+    circle_buffer = NEW_NOTHROW Memory_table(RCIN_RPI_BUFFER_LENGTH * 2, _version);
+    con_blocks = NEW_NOTHROW Memory_table(RCIN_RPI_BUFFER_LENGTH * 15, _version);
 
     init_registers();
 

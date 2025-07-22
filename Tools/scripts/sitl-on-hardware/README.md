@@ -7,21 +7,28 @@ Run the sitl-on-hw.sh script to compile and flash for MatekH743.  Adjust for you
 ::
 
 	cd $HOME/ardupilot
-    ./libraries/SITL/examples/on-hardware/sitl-on-hw.py --board	MatekH743 --vehicle copter
+    ./Tools/scripts/sitl-on-hardware/sitl-on-hw.py --board	MatekH743 --vehicle copter
 
 Plane can also be simulated:
 
 ::
 
 	cd $HOME/ardupilot
-    ./libraries/SITL/examples/on-hardware/sitl-on-hw.py --board MatekH743 --vehicle plane
+    ./Tools/scripts/sitl-on-hardware/sitl-on-hw.py --board MatekH743 --vehicle plane
 
 and quadplane:
 
 ::
 
 	cd $HOME/ardupilot
-    ./libraries/SITL/examples/on-hardware/sitl-on-hw.py --board MatekH743 --vehicle plane --simclass QuadPlane
+    ./Tools/scripts/sitl-on-hardware/sitl-on-hw.py --board MatekH743 --vehicle plane --simclass QuadPlane
+
+### Copter :
+
+Only the default quad frame is enable by default, to enable another frame type, you need to enable the right compile flag :
+e.g. for octa-quad frame, AP_MOTORS_FRAME_OCTAQUAD_ENABLED 1 in the hwdef file. Compile flags list is in AP_Motors_class.h
+Passing --frame parameter will enable the right compile flag for you.
+
 
 ## Configuring
 

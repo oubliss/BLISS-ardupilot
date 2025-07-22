@@ -15,7 +15,7 @@
 /*
   Simulator for the serial LightWare rangefinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:lightwareserial --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:lightwareserial --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set RNGFND1_TYPE 8
@@ -35,6 +35,8 @@ namespace SITL {
 
 class RF_LightWareSerial : public SerialRangeFinder {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_LightWareSerial(); }
 
     uint32_t packet_for_alt(uint16_t alt_cm, uint8_t *buffer, uint8_t buflen) override;
 

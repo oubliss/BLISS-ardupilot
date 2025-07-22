@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+
+# flake8: noqa
+
 '''
 test script to check if all CAN GPS nodes are producing Fix2 frames at the expected rate
 '''
@@ -26,7 +29,7 @@ last_fix2 = {}
 def handle_fix2(msg):
     nodeid = msg.transfer.source_node_id
     tstamp = msg.transfer.ts_real
-    if not nodeid in last_fix2:
+    if nodeid not in last_fix2:
         last_fix2[nodeid] = tstamp
         return
     dt = tstamp - last_fix2[nodeid]

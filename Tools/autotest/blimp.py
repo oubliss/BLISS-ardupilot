@@ -4,13 +4,12 @@ Fly Blimp in SITL
 AP_FLAKE8_CLEAN
 '''
 
-from __future__ import print_function
 import os
 import shutil
 
 from pymavlink import mavutil
 
-from common import AutoTest
+from vehicle_test_suite import TestSuite
 
 # get location of scripts
 testdir = os.path.dirname(os.path.realpath(__file__))
@@ -25,7 +24,7 @@ SITL_START_LOCATION = mavutil.location(-35.362938, 149.165085, 584, 0)
 #   switch 6 = Manual
 
 
-class AutoTestBlimp(AutoTest):
+class AutoTestBlimp(TestSuite):
     @staticmethod
     def get_not_armable_mode_list():
         return []
@@ -237,6 +236,15 @@ class AutoTestBlimp(AutoTest):
 
         self.disarm_vehicle()
 
+    def PREFLIGHT_Pressure(self):
+        '''test triggering pressure calibration with mavlink command'''
+        # as airspeed is not instantiated on Blimp we expect to
+        # instantly get back an accepted.
+        self.run_cmd(
+            mavutil.mavlink.MAV_CMD_PREFLIGHT_CALIBRATION,
+            p3=1, # p3, baro
+        )
+
     def tests(self):
         '''return list of all tests'''
         # ret = super(AutoTestBlimp, self).tests()
@@ -244,6 +252,7 @@ class AutoTestBlimp(AutoTest):
         ret.extend([
             self.FlyManual,
             self.FlyLoiter,
+            self.PREFLIGHT_Pressure,
         ])
         return ret
 

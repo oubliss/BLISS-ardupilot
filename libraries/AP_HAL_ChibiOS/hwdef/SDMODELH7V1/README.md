@@ -124,7 +124,7 @@ RC input is configured on the R6 (UART6_RX) pin. It supports all RC protocols ex
  - SBUS/DSM/SRXL connects to the R6 pin.
  - FPort requires connection to T6 and SERIAL6_OPTIONS be set to "7".
  - CRSF also requires a T6 connection, in addition to R6, and automatically provides telemetry. Set SERIAL6_OPTIONS to "0".
- - SRXL2 requires a connecton to T6 and automatically provides telemetry. Set SERIAL6_OPTIONS to "4".
+ - SRXL2 requires a connection to T6 and automatically provides telemetry. Set SERIAL6_OPTIONS to "4".
 
 Any UART can be used for RC system connections in ArduPilot also, and is compatible with all protocols except PPM. See Radio Control Systems for details.
 FrSky Telemetry¶
@@ -139,7 +139,9 @@ FrSky Telemetry is supported using the Tx pin of any UART. You need to set the f
 The SDH7V1 supports OSD using OSD_TYPE 1 (MAX7456 driver). The defaults are also setup to allow DJI Goggle OSD support on UART1.
 PWM Output¶
 
-The KakuteH7 supports up to 8 PWM outputs. Outputs are available via two JST-SH connectors. All 8 outputs support DShot and bi-directional DShot, as well as all PWM types.
+## PWM Outputs
+
+The SDH7V1 supports up to 8 PWM outputs. Outputs are available via two JST-SH connectors. All 8 outputs support DShot and bi-directional DShot, as well as all PWM types.
 
 The PWM is in 3 groups:
 

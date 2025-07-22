@@ -9,7 +9,7 @@
 #include <AP_Math/definitions.h>
 #include <string.h>
 
-#ifdef HAL_PERIPH_ENABLE_ESC_APD
+#if AP_PERIPH_ESC_APD_ENABLED
 
 extern const AP_HAL::HAL& hal;
 
@@ -17,8 +17,9 @@ extern const AP_HAL::HAL& hal;
 #define TELEM_LEN    0x16
 
 ESC_APD_Telem::ESC_APD_Telem (AP_HAL::UARTDriver *_uart, float num_poles) :
-    pole_count(num_poles),
-    uart(_uart) {
+    uart(_uart),
+    pole_count(num_poles)
+{
     uart->begin(115200);
 }
 
@@ -48,7 +49,7 @@ bool ESC_APD_Telem::update() {
                     // valid packet, copy the data we need and reset length
                     decoded.voltage = le16toh(received.packet.voltage) * 1e-2f;
                     decoded.temperature = convert_temperature(le16toh(received.packet.temperature));
-                    decoded.current = le16toh(received.packet.bus_current) * (1 / 12.5f);
+                    decoded.current = ((int16_t)le16toh(received.packet.bus_current)) * (1 / 12.5f);
                     decoded.rpm = le32toh(received.packet.erpm) / pole_count;
                     decoded.power_rating_pct = le16toh(received.packet.motor_duty) * 1e-2f;
                     ret = true;
@@ -94,4 +95,4 @@ float ESC_APD_Telem::convert_temperature(uint16_t raw) const {
     return temperature;
 }
 
-#endif // HAL_PERIPH_ENABLE_ESC_APD
+#endif // AP_PERIPH_ESC_APD_ENABLED

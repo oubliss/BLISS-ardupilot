@@ -124,7 +124,7 @@ public:
     static AP_RangeFinder_Backend_Serial *create(
         RangeFinder::RangeFinder_State &_state,
         AP_RangeFinder_Params &_params) {
-        return new AP_RangeFinder_BLPing(_state, _params);
+        return NEW_NOTHROW AP_RangeFinder_BLPing(_state, _params);
     }
 
     /**
@@ -132,6 +132,13 @@ public:
      *
      */
     void update(void) override;
+
+    /**
+     * @brief Get the reading confidence
+     * 100 is best quality, 0 is worst
+     *
+     */
+    int8_t get_signal_quality_pct() const override WARN_IF_UNUSED;
 
 protected:
     /**

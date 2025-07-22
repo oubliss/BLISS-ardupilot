@@ -100,6 +100,9 @@ public:
     AC_PID& get_sailboat_heel_pid() { return _sailboat_heel_pid; }
     const AP_PIDInfo& get_throttle_speed_pid_info() const { return _throttle_speed_pid_info; }
 
+    // set the PID notch sample rates
+    void set_notch_sample_rate(float sample_rate);
+
     // get the slew rate value for speed and steering for oscillation detection in lua scripts
     void get_srate(float &steering_srate, float &speed_srate);
 
@@ -151,6 +154,7 @@ private:
     AP_Int8  _brake_enable;         // speed control brake enable/disable. if set to 1 a reversed output to the motors to slow the vehicle.
     AP_Float _stop_speed;           // speed control stop speed.  Motor outputs to zero once vehicle speed falls below this value
     AP_Float _steer_accel_max;      // steering angle acceleration max in deg/s/s
+    AP_Float _steer_decel_max;      // steering angle deceleration max in deg/s/s
     AP_Float _steer_rate_max;       // steering rate control maximum rate in deg/s
     AP_Float _turn_lateral_G_max;   // sterring maximum lateral acceleration limit in 'G'
 

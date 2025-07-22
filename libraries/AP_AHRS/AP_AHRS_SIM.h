@@ -60,9 +60,6 @@ public:
     void            get_results(Estimates &results) override;
     void            reset() override { return; }
 
-    // dead-reckoning support
-    virtual bool get_location(Location &loc) const override;
-
     // get latest altitude estimate above ground level in meters and validity flag
     bool get_hagl(float &hagl) const override WARN_IF_UNUSED;
 
@@ -71,11 +68,11 @@ public:
 
     // return an airspeed estimate if available. return true
     // if we have an estimate
-    bool airspeed_estimate(float &airspeed_ret) const override;
+    bool airspeed_EAS(float &airspeed_ret) const override;
 
     // return an airspeed estimate if available. return true
     // if we have an estimate from a specific sensor index
-    bool airspeed_estimate(uint8_t airspeed_index, float &airspeed_ret) const override;
+    bool airspeed_EAS(uint8_t airspeed_index, float &airspeed_ret) const override;
 
     // return a ground vector estimate in meters/second, in North/East order
     Vector2f groundspeed_vector() override;
@@ -101,15 +98,11 @@ public:
     // get_filter_status - returns filter status as a series of flags
     bool get_filter_status(nav_filter_status &status) const override;
 
-    // get compass offset estimates
-    // true if offsets are valid
-    bool get_mag_offsets(uint8_t mag_idx, Vector3f &magOffsets) const override;
-
     // relative-origin functions for fallback in AP_InertialNav
     bool get_origin(Location &ret) const override;
-    bool get_relative_position_NED_origin(Vector3f &vec) const override;
-    bool get_relative_position_NE_origin(Vector2f &posNE) const override;
-    bool get_relative_position_D_origin(float &posD) const override;
+    bool get_relative_position_NED_origin(Vector3p &vec) const override;
+    bool get_relative_position_NE_origin(Vector2p &posNE) const override;
+    bool get_relative_position_D_origin(postype_t &posD) const override;
 
     void send_ekf_status_report(class GCS_MAVLINK &link) const override;
 
@@ -118,6 +111,9 @@ public:
     bool get_variances(float &velVar, float &posVar, float &hgtVar, Vector3f &magVar, float &tasVar) const override;
 
 private:
+
+    // dead-reckoning support
+    bool get_location(Location &loc) const;
 
 #if HAL_NAVEKF3_AVAILABLE
     // a reference to the EKF3 backend that we can use to send in

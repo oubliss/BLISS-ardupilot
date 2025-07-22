@@ -9,7 +9,7 @@ ifeq ($(USE_OPT),)
 endif
 
 ifeq ($(ENABLE_DEBUG_SYMBOLS), yes)
-  USE_OPT += -g
+  USE_OPT += -g3
 endif
 
 # C specific options here (added to USE_OPT).
@@ -66,10 +66,6 @@ endif
 include $(CHIBIOS)/os/various/cpp_wrappers/chcpp.mk
 ifeq ($(USE_FATFS),yes)
 include $(CHIBIOS)/os/various/fatfs_bindings/fatfs.mk
-endif
-
-ifeq ($(USE_LWIP),yes)
-include $(CHIBIOS)/os/various/lwip_bindings/lwip.mk
 endif
 
 #
@@ -147,10 +143,6 @@ CSRC += $(HWDEF)/common/stubs.c \
 ifeq ($(USE_USB_MSD),yes)
 CSRC += $(CHIBIOS)/os/various/scsi_bindings/lib_scsi.c \
         $(CHIBIOS)/os/hal/src/hal_usb_msd.c
-endif
-
-ifeq ($(USE_LWIP),yes)
-CSRC += $(CHIBIOS)/os/various/evtimer.c
 endif
 
 #	   $(TESTSRC) \

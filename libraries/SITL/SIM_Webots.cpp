@@ -16,9 +16,11 @@
   simulator connector for webots simulator
 */
 
-#include "SIM_Webots.h"
+#include "SIM_config.h"
 
-#if HAL_SIM_WEBOTS_ENABLED
+#if AP_SIM_WEBOTS_ENABLED
+
+#include "SIM_Webots.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -29,7 +31,6 @@
 #include <sys/types.h>
 
 #include <AP_HAL/AP_HAL.h>
-#include <AP_Logger/AP_Logger.h>
 #include "pthread.h"
 #include <AP_HAL/utility/replace.h>
 
@@ -291,7 +292,7 @@ bool Webots::parse_sensors(const char *json)
 bool Webots::connect_sockets(void)
 {
     if (!sim_sock) {
-        sim_sock = new SocketAPM(false);
+        sim_sock = NEW_NOTHROW SocketAPM_native(false);
         if (!sim_sock) {
             AP_HAL::panic("Out of memory for sensors socket");
         }
@@ -536,4 +537,4 @@ void Webots::report_FPS(void)
     // }
 }
 
-#endif // HAL_SIM_WEBOTS_ENABLED
+#endif  // AP_SIM_WEBOTS_ENABLED

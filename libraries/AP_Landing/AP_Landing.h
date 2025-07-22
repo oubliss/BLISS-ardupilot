@@ -61,8 +61,12 @@ public:
     // we support upto 32 boolean bits for users wanting to change landing behaviour.
     enum OptionsMask {
         ON_LANDING_FLARE_USE_THR_MIN                   = (1<<0),   // If set then set trottle to thr_min instead of zero on final flare
-        ON_LANDING_USE_ARSPD_MAX                       = (1<<1),   // If set then allow landing throttle constraint to be increased from trim airspeed to max airspeed (ARSPD_FBW_MAX)
+        ON_LANDING_USE_ARSPD_MAX                       = (1<<1),   // If set then allow landing throttle constraint to be increased from trim airspeed to max airspeed (AIRSPEED_MAX)
     };
+
+    void convert_parameters(void);
+
+    void reset(void);
 
     void do_land(const AP_Mission::Mission_Command& cmd, const float relative_altitude);
     bool verify_abort_landing(const Location &prev_WP_loc, Location &next_WP_loc, const Location &current_loc,
@@ -75,6 +79,7 @@ public:
     void check_if_need_to_abort(const AP_FixedWing::Rangefinder_State &rangefinder_state);
     bool request_go_around(void);
     bool is_flaring(void) const;
+    bool is_on_final(void) const;
     bool is_on_approach(void) const;
     bool is_ground_steering_allowed(void) const;
     bool is_throttle_suppressed(void) const;
@@ -91,14 +96,15 @@ public:
 
     // helper functions
     bool restart_landing_sequence(void);
-    float wind_alignment(const float heading_deg);
-    float head_wind(void);
     int32_t get_target_airspeed_cm(void);
 
     // accessor functions for the params and states
     static const struct AP_Param::GroupInfo var_info[];
-    
-    int16_t get_pitch_cd(void) const { return pitch_cd; }
+
+    // Return the landing type
+    Landing_Type get_type() const { return (Landing_Type)type.get(); }
+
+    int16_t get_pitch_cd(void) const { return pitch_deg*100; }
     float get_flare_sec(void) const { return flare_sec; }
     int8_t get_disarm_delay(void) const { return disarm_delay; }
     int8_t get_then_servos_neutral(void) const { return then_servos_neutral; }
@@ -153,7 +159,7 @@ private:
     AP_Landing_Deepstall deepstall;
 #endif
 
-    AP_Int16 pitch_cd;
+    AP_Float pitch_deg;
     AP_Float flare_alt;
     AP_Float flare_sec;
     AP_Float pre_flare_airspeed;
@@ -201,7 +207,11 @@ private:
     void type_slope_log(void) const;
     bool type_slope_is_complete(void) const;
     bool type_slope_is_flaring(void) const;
+    bool type_slope_is_on_final(void) const;
     bool type_slope_is_on_approach(void) const;
     bool type_slope_is_expecting_impact(void) const;
     bool type_slope_is_throttle_suppressed(void) const;
+
+    // return a location alt in cm as AMSL
+    int32_t loc_alt_AMSL_cm(const Location &loc) const;
 };

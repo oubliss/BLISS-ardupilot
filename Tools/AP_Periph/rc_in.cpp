@@ -15,7 +15,7 @@
 
 #include <AP_RCProtocol/AP_RCProtocol_config.h>
 
-#ifdef HAL_PERIPH_ENABLE_RCIN
+#if AP_PERIPH_RCIN_ENABLED
 
 #ifndef AP_PERIPH_RC1_PORT_DEFAULT
 #define AP_PERIPH_RC1_PORT_DEFAULT -1
@@ -33,7 +33,7 @@ extern const AP_HAL::HAL &hal;
 
 const AP_Param::GroupInfo Parameters_RCIN::var_info[] {
     // RC_PROTOCOLS copied from RC_Channel/RC_Channels_Varinfo.h
-    // @Param: RC_PROTOCOLS
+    // @Param: _PROTOCOLS
     // @DisplayName: RC protocols enabled
     // @Description: Bitmask of enabled RC protocols. Allows narrowing the protocol detection to only specific types of RC receivers which can avoid issues with incorrect detection. Set to 1 to enable all protocols.
     // @User: Advanced
@@ -41,7 +41,7 @@ const AP_Param::GroupInfo Parameters_RCIN::var_info[] {
     AP_GROUPINFO("_PROTOCOLS", 1, Parameters_RCIN, rcin_protocols, 1),
 
     // RC_PROTOCOLS copied from RC_Channel/RC_Channels_Varinfo.h
-    // @Param: RC_MSGRATE
+    // @Param: _MSGRATE
     // @DisplayName: DroneCAN RC Message rate
     // @Description: Rate at which RC input is sent via DroneCAN
     // @User: Advanced
@@ -50,7 +50,7 @@ const AP_Param::GroupInfo Parameters_RCIN::var_info[] {
     // @Units: Hz
     AP_GROUPINFO("_MSGRATE", 2, Parameters_RCIN, rcin_rate_hz, 50),
 
-    // @Param: RC1_PORT
+    // @Param: 1_PORT
     // @DisplayName: RC input port
     // @Description: This is the serial port number where SERIALx_PROTOCOL will be set to RC input.
     // @Range: 0 10
@@ -59,9 +59,8 @@ const AP_Param::GroupInfo Parameters_RCIN::var_info[] {
     // @RebootRequired: True
     AP_GROUPINFO("_PORT", 3, Parameters_RCIN, rcin1_port, AP_PERIPH_RC1_PORT_DEFAULT),
 
-    // @Param: RC1_PORT_OPTIONS
+    // @Param: 1_PORT_OPTIONS
     // @DisplayName: RC input port serial options
-    // @Description: This is the serial port number where SERIALx_PROTOCOL will be set to RC input.
     // @Description: Control over UART options. The InvertRX option controls invert of the receive pin. The InvertTX option controls invert of the transmit pin. The HalfDuplex option controls half-duplex (onewire) mode, where both transmit and receive is done on the transmit wire. The Swap option allows the RX and TX pins to be swapped on STM32F7 based boards.
     // @Bitmask: 0:InvertRX, 1:InvertTX, 2:HalfDuplex, 3:SwapTXRX, 4: RX_PullDown, 5: RX_PullUp, 6: TX_PullDown, 7: TX_PullUp, 8: RX_NoDMA, 9: TX_NoDMA, 10: Don't forward mavlink to/from, 11: DisableFIFO, 12: Ignore Streamrate
     AP_GROUPINFO("1_PORT_OPTIONS", 4, Parameters_RCIN, rcin1_port_options, AP_PERIPH_RC1_PORT_OPTIONS_DEFAULT),
@@ -115,7 +114,7 @@ void AP_Periph_FW::rcin_update()
     }
 
     // log discovered protocols:
-    auto new_rc_protocol = rc.protocol_name();
+    auto new_rc_protocol = rc.detected_protocol_name();
     if (new_rc_protocol != rcin_rc_protocol) {
         can_printf("Decoding (%s)", new_rc_protocol);
         rcin_rc_protocol = new_rc_protocol;
@@ -166,7 +165,7 @@ void AP_Periph_FW::can_send_RCInput(uint8_t quality, uint16_t *values, uint8_t n
     }
 
     // encode and send message:
-    uint8_t buffer[DRONECAN_SENSORS_RC_RCINPUT_MAX_SIZE] {};
+    uint8_t buffer[DRONECAN_SENSORS_RC_RCINPUT_MAX_SIZE];
 
     uint16_t total_size = dronecan_sensors_rc_RCInput_encode(&pkt, buffer, !periph.canfdout());
 
@@ -177,4 +176,4 @@ void AP_Periph_FW::can_send_RCInput(uint8_t quality, uint16_t *values, uint8_t n
                      total_size);
 }
 
-#endif  // HAL_PERIPH_ENABLE_RCIN
+#endif  // AP_PERIPH_RCIN_ENABLED

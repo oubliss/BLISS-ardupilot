@@ -29,8 +29,8 @@ static AP_BoardConfig board_config;
 static AP_InertialSensor ins;
 static AP_Baro baro;
 AP_Int32 logger_bitmask;
-static AP_Logger logger{logger_bitmask};
-#if HAL_EXTERNAL_AHRS_ENABLED
+static AP_Logger logger;
+#if AP_EXTERNAL_AHRS_ENABLED
 static AP_ExternalAHRS external_ahrs;
 #endif
 static SITL::SIM sitl;
@@ -41,10 +41,6 @@ GCS_Dummy _gcs;
 
 const struct LogStructure log_structure[] = {
     LOG_COMMON_STRUCTURES
-};
-
-const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
-    AP_GROUPEND
 };
 
 class Arming : public AP_Arming {
@@ -123,7 +119,7 @@ void setup()
         sitl.gyro_file_rw.set(SITL::SIM::INSFileMode::INS_FILE_READ_STOP_ON_EOF);   // SIM_GYR_FILE_RW
     }
     logger_bitmask.set(128);    // IMU
-    logger.Init(log_structure, ARRAY_SIZE(log_structure));
+    logger.init(logger_bitmask, log_structure, ARRAY_SIZE(log_structure));
     ins.init(LOOP_RATE_HZ);
     baro.init();
 

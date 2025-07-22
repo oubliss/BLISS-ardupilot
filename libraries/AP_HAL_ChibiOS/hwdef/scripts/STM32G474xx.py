@@ -1,4 +1,6 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+# flake8: noqa
 '''
 tables for STM32G474xx MCUs
 '''
@@ -20,7 +22,7 @@ mcu = {
         (0x10000000, 32, 2), # CCM
     ],
 
-    'EXPECTED_CLOCK' : 168000000,
+    'EXPECTED_CLOCK' : 160000000,
 
     'DEFINES' : {
         'STM32G4' : '1',

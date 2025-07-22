@@ -79,11 +79,17 @@ void ModeAuto::update()
     }
 #endif
 
+#if AP_PLANE_GLIDER_PULLUP_ENABLED
+    if (pullup.in_pullup()) {
+        return;
+    }
+#endif
+
     if (nav_cmd_id == MAV_CMD_NAV_TAKEOFF ||
         (nav_cmd_id == MAV_CMD_NAV_LAND && plane.flight_stage == AP_FixedWing::FlightStage::ABORT_LANDING)) {
         plane.takeoff_calc_roll();
         plane.takeoff_calc_pitch();
-        plane.calc_throttle();
+        plane.takeoff_calc_throttle();
     } else if (nav_cmd_id == MAV_CMD_NAV_LAND) {
         plane.calc_nav_roll();
         plane.calc_nav_pitch();
@@ -102,7 +108,6 @@ void ModeAuto::update()
         // NAV_SCRIPTING has a desired roll and pitch rate and desired throttle
         plane.nav_roll_cd = ahrs.roll_sensor;
         plane.nav_pitch_cd = ahrs.pitch_sensor;
-        SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, plane.nav_scripting.throttle_pct);
 #endif
     } else {
         // we are doing normal AUTO flight, the special cases
@@ -145,7 +150,7 @@ bool ModeAuto::_pre_arm_checks(size_t buflen, char *buffer) const
 {
 #if HAL_QUADPLANE_ENABLED
     if (plane.quadplane.enabled()) {
-        if (plane.quadplane.option_is_set(QuadPlane::OPTION::ONLY_ARM_IN_QMODE_OR_AUTO) &&
+        if (plane.quadplane.option_is_set(QuadPlane::Option::ONLY_ARM_IN_QMODE_OR_AUTO) &&
                 !plane.quadplane.is_vtol_takeoff(plane.mission.get_current_nav_cmd().id)) {
             hal.util->snprintf(buffer, buflen, "not in VTOL takeoff");
             return false;
@@ -163,4 +168,35 @@ bool ModeAuto::_pre_arm_checks(size_t buflen, char *buffer) const
 bool ModeAuto::is_landing() const
 {
     return (plane.flight_stage == AP_FixedWing::FlightStage::LAND);
+}
+
+void ModeAuto::run()
+{
+#if AP_PLANE_GLIDER_PULLUP_ENABLED
+    if (pullup.in_pullup()) {
+        pullup.stabilize_pullup();
+        return;
+    }
+#endif
+    
+    if (plane.mission.get_current_nav_cmd().id == MAV_CMD_NAV_ALTITUDE_WAIT) {
+
+        wiggle_servos();
+
+        SRV_Channels::set_output_scaled(SRV_Channel::k_throttle, 0.0);
+        SRV_Channels::set_output_scaled(SRV_Channel::k_throttleLeft, 0.0);
+        SRV_Channels::set_output_scaled(SRV_Channel::k_throttleRight, 0.0);
+
+        SRV_Channels::set_output_to_trim(SRV_Channel::k_throttle);
+        SRV_Channels::set_output_to_trim(SRV_Channel::k_throttleLeft);
+        SRV_Channels::set_output_to_trim(SRV_Channel::k_throttleRight);
+
+        // Relax attitude control
+        reset_controllers();
+
+    } else {
+        // Normal flight, run base class
+        Mode::run();
+
+    }
 }

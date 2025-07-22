@@ -15,7 +15,7 @@
 /*
   Simulator for the LightWare S45B proximity sensor
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:sf45b --speedup=1 -l 51.8752066,14.6487840,54.15,0
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:sf45b --speedup=1 -l 51.8752066,14.6487840,54.15,0
 
 param set SERIAL5_PROTOCOL 11  # proximity
 param set PRX1_TYPE 8  # s45b
@@ -41,13 +41,11 @@ rc 2 1450
 
 #pragma once
 
+#include "SIM_config.h"
+
+#if AP_SIM_PS_LIGHTWARE_SF45B_ENABLED
+
 #include "SIM_PS_LightWare.h"
-
-#ifndef HAL_SIM_PS_LIGHTWARE_SF45B_ENABLED
-#define HAL_SIM_PS_LIGHTWARE_SF45B_ENABLED HAL_SIM_PS_LIGHTWARE_ENABLED
-#endif
-
-#if HAL_SIM_PS_LIGHTWARE_SF45B_ENABLED
 
 #include <AP_Math/crc.h>
 #include <AP_InternalError/AP_InternalError.h>
@@ -71,8 +69,8 @@ private:
     class PACKED PackedMessage {
     public:
         PackedMessage(T _msg, uint16_t _flags) :
-            msg(_msg),
-            flags(_flags)
+            flags(_flags),
+            msg(_msg)
         {
             flags |= (sizeof(T)) << 6;
         }
@@ -266,4 +264,4 @@ private:
 
 };
 
-#endif  // HAL_SIM_PS_LIGHTWARE_SF45B_ENABLED
+#endif  // AP_SIM_PS_LIGHTWARE_SF45B_ENABLED

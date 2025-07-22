@@ -1,6 +1,6 @@
-#include <AP_HAL/AP_HAL.h>
-#include <AP_Baro/AP_Baro.h>
 #include "AP_InertialNav.h"
+
+#include <AP_AHRS/AP_AHRS.h>
 
 /*
   A wrapper around the AP_InertialNav class which uses the NavEKF
@@ -15,40 +15,34 @@ void AP_InertialNav::update(bool high_vibes)
 {
     // get the NE position relative to the local earth frame origin
     Vector2f posNE;
-    if (_ahrs_ekf.get_relative_position_NE_origin(posNE)) {
+    if (_ahrs_ekf.get_relative_position_NE_origin_float(posNE)) {
         _relpos_cm.x = posNE.x * 100; // convert from m to cm
         _relpos_cm.y = posNE.y * 100; // convert from m to cm
     }
 
     // get the D position relative to the local earth frame origin
     float posD;
-    if (_ahrs_ekf.get_relative_position_D_origin(posD)) {
+    if (_ahrs_ekf.get_relative_position_D_origin_float(posD)) {
         _relpos_cm.z = - posD * 100; // convert from m in NED to cm in NEU
     }
 
     // get the velocity relative to the local earth frame
     Vector3f velNED;
-    if (_ahrs_ekf.get_velocity_NED(velNED)) {
-        // during high vibration events use vertical position change
-        if (high_vibes) {
-            float rate_z;
-            if (_ahrs_ekf.get_vert_pos_rate_D(rate_z)) {
-                velNED.z = rate_z;
-            }
-        }
+    
+    const bool velned_ok = _ahrs_ekf.get_velocity_NED(velNED);
+    if (velned_ok) {
         _velocity_cm = velNED * 100; // convert to cm/s
         _velocity_cm.z = -_velocity_cm.z; // convert from NED to NEU
     }
-}
-
-/**
- * get_filter_status : returns filter status as a series of flags
- */
-nav_filter_status AP_InertialNav::get_filter_status() const
-{
-    nav_filter_status status;
-    _ahrs_ekf.get_filter_status(status);
-    return status;
+    //  During high vibration events, or failure of get_velocity_NED, use the
+    //  fallback vertical velocity estimate. For get_velocity_NED failure, freeze
+    //  the horizontal velocity at the last good value.
+    if (!velned_ok || high_vibes) {
+        float rate_z;
+        if (_ahrs_ekf.get_vert_pos_rate_D(rate_z)) {
+            _velocity_cm.z = -rate_z * 100; // convert from m/s in NED to cm/s in NEU
+        }
+    }
 }
 
 /**

@@ -17,6 +17,7 @@
 #include <AP_Param/AP_Param.h>
 #include "transition.h"
 #include <AP_Motors/AP_MotorsTailsitter.h>
+#include <AP_Logger/LogStructure.h>
 
 class QuadPlane;
 class AP_MotorsMulticopter;
@@ -66,9 +67,11 @@ public:
     // return true if pitch control should be relaxed
     bool relax_pitch();
 
+    // Write tailsitter specific log
+    void write_log();
+
     // tailsitter speed scaler
     float last_spd_scaler = 1.0f; // used to slew rate limiting with TAILSITTER_GSCL_ATT_THR option
-    float log_spd_scaler; // for QTUN log
 
     static const struct AP_Param::GroupInfo var_info[];
 
@@ -112,6 +115,23 @@ public:
 
 private:
 
+    // Tailsitter specific log message
+    struct PACKED log_tailsitter {
+        LOG_PACKET_HEADER;
+        uint64_t time_us;
+        float throttle_scaler;
+        float speed_scaler;
+        float min_throttle;
+    };
+
+    // Data to be logged
+    struct {
+        float throttle_scaler;
+        float speed_scaler;
+        float min_throttle;
+    } log_data;
+
+
     bool setup_complete;
 
     // true when flying a tilt-vectored tailsitter
@@ -124,7 +144,7 @@ private:
     bool _have_elevon;
     bool _have_v_tail;
 
-    // refences for convenience
+    // references for convenience
     QuadPlane& quadplane;
     AP_MotorsMulticopter*& motors;
 
@@ -148,14 +168,14 @@ public:
 
     void force_transition_complete() override;
 
-    bool complete() const override { return transition_state == TRANSITION_DONE; }
+    bool complete() const override { return transition_state == State::DONE; }
 
     // setup for the transition back to fixed wing
     void restart() override;
 
     uint8_t get_log_transition_state() const override { return static_cast<uint8_t>(transition_state); }
 
-    bool active() const override { return transition_state != TRANSITION_DONE; }
+    bool active_frwd() const override { return transition_state == State::ANGLE_WAIT_FW; }
 
     bool show_vtol_view() const override;
 
@@ -171,10 +191,10 @@ public:
 
 private:
 
-    enum {
-        TRANSITION_ANGLE_WAIT_FW,
-        TRANSITION_ANGLE_WAIT_VTOL,
-        TRANSITION_DONE
+    enum class State {
+        ANGLE_WAIT_FW   = 0,
+        ANGLE_WAIT_VTOL = 1,
+        DONE            = 2,
     } transition_state;
 
     // for transition to VTOL flight

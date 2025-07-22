@@ -29,9 +29,9 @@ void Sub::update_surface_and_bottom_detector()
 
 
         if (ap.at_surface) {
-            set_surfaced(current_depth > g.surface_depth/100.0 - 0.05); // add a 5cm buffer so it doesn't trigger too often
+            set_surfaced(current_depth > g.surface_depth*0.01 - 0.05); // add a 5cm buffer so it doesn't trigger too often
         } else {
-            set_surfaced(current_depth > g.surface_depth/100.0); // If we are above surface depth, we are surfaced
+            set_surfaced(current_depth > g.surface_depth*0.01); // If we are above surface depth, we are surfaced
         }
 
 
@@ -90,9 +90,9 @@ void Sub::set_surfaced(bool at_surface)
     surface_detector_count = 0;
 
     if (ap.at_surface) {
-        AP::logger().Write_Event(LogEvent::SURFACED);
+        LOGGER_WRITE_EVENT(LogEvent::SURFACED);
     } else {
-        AP::logger().Write_Event(LogEvent::NOT_SURFACED);
+        LOGGER_WRITE_EVENT(LogEvent::NOT_SURFACED);
     }
 }
 
@@ -108,8 +108,8 @@ void Sub::set_bottomed(bool at_bottom)
     bottom_detector_count = 0;
 
     if (ap.at_bottom) {
-        AP::logger().Write_Event(LogEvent::BOTTOMED);
+        LOGGER_WRITE_EVENT(LogEvent::BOTTOMED);
     } else {
-        AP::logger().Write_Event(LogEvent::NOT_BOTTOMED);
+        LOGGER_WRITE_EVENT(LogEvent::NOT_BOTTOMED);
     }
 }

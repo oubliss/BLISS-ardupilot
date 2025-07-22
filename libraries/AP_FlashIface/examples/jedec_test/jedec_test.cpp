@@ -38,10 +38,6 @@ GCS_Dummy _gcs;
 #define DELAY_MICROS(x)         do { hal.scheduler->delay_microseconds(x); } while(0)
 #endif
 
-const AP_Param::GroupInfo GCS_MAVLINK_Parameters::var_info[] = {
-        AP_GROUPEND
-};
-
 static AP_SerialManager serial_manager;
 static AP_BoardConfig board_config;
 
@@ -56,7 +52,7 @@ static UNUSED_FUNCTION void test_page_program()
         hal.console->printf("Failed to allocate data for read");
     }
 
-    // fill program data with its own adress
+    // fill program data with its own address
     for (uint32_t i = 0; i < jedec_dev.get_page_size(); i++) {
         data[i] = i;
     }

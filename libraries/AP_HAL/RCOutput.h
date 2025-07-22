@@ -154,6 +154,11 @@ public:
      */
     virtual uint16_t get_erpm(uint8_t chan) const { return 0; }
     virtual float get_erpm_error_rate(uint8_t chan) const { return 100.0f; }
+    /*
+      allow all erpm values to be read and for new updates to be detected - primarily for IOMCU
+     */
+    virtual bool  new_erpm() { return false; }
+    virtual uint32_t  read_erpm(uint16_t* erpm, uint8_t len) { return 0; }
 
     /*
       enable PX4IO SBUS out at the given rate
@@ -189,16 +194,22 @@ public:
       read a series of bytes from a port, using serial parameters from serial_setup_output()
       return the number of bytes read. This is a blocking call
      */
-    virtual uint16_t serial_read_bytes(uint8_t *buf, uint16_t len) { return 0; }
+    virtual uint16_t serial_read_bytes(uint8_t *buf, uint16_t len, uint32_t timeout_us) { return 0; }
     
     /*
       stop serial output. This restores the previous output mode for
       the channel and any other channels that were stopped by
       serial_setup_output()
      */
-    virtual void serial_end(void) {}
+    virtual void serial_end(uint32_t chanmask) {}
     
     /*
+      reset serial output. This re-initializes the DMA configuration to that configured by
+      serial_setup_output()
+     */
+    virtual void serial_reset(uint32_t chanmask) {}
+
+     /*
       output modes. Allows for support of PWM, oneshot and dshot 
     */
     // this enum is used by BLH_OTYPE and ESC_PWM_TYPE on AP_Periph
@@ -215,6 +226,7 @@ public:
         MODE_PWM_DSHOT1200,
         MODE_NEOPIXEL,  // same as MODE_PWM_DSHOT at 800kHz but it's an LED
         MODE_PROFILED,  // same as MODE_PWM_DSHOT using separate clock and data
+        MODE_NEOPIXELRGB,  // same as MODE_NEOPIXEL but RGB ordering
     };
     // true when the output mode is of type dshot
     // static to allow use in the ChibiOS thread stuff
@@ -223,6 +235,7 @@ public:
     static bool is_led_protocol(const enum output_mode mode) {
       switch (mode) {
       case MODE_NEOPIXEL:
+      case MODE_NEOPIXELRGB:
       case MODE_PROFILED:
         return true;
       default:
@@ -330,7 +343,7 @@ public:
 
     const static uint32_t ALL_CHANNELS = 255;
     /*
-      Send a dshot command, if command timout is 0 then 10 commands are sent
+      Send a dshot command, if command timeout is 0 then 10 commands are sent
       chan is the servo channel to send the command to
      */
     virtual void send_dshot_command(uint8_t command, uint8_t chan = ALL_CHANNELS, uint32_t command_timeout_ms = 0, uint16_t repeat_count = 10, bool priority = false) {}
@@ -350,12 +363,12 @@ public:
       setup serial led output data for a given output channel
       and led number. A led number of -1 means all LEDs. LED 0 is the first LED
      */
-    virtual void set_serial_led_rgb_data(const uint16_t chan, int8_t led, uint8_t red, uint8_t green, uint8_t blue) {}
-    
+    virtual bool set_serial_led_rgb_data(const uint16_t chan, int8_t led, uint8_t red, uint8_t green, uint8_t blue) { return false; }
+
     /*
       trigger send of serial led
      */
-    virtual void serial_led_send(const uint16_t chan) {}
+    virtual bool serial_led_send(const uint16_t chan) { return false; }
 
     virtual void timer_info(ExpandingString &str) {}
 
@@ -370,9 +383,14 @@ public:
     virtual void write_gpio(uint8_t chan, bool active) {};
 
     /*
+      Force group trigger from all callers rather than just from the main thread
+    */
+    virtual void force_trigger_groups(bool onoff) {};
+
+    /*
      * calculate the prescaler required to achieve the desire bitrate
      */
-    static uint32_t calculate_bitrate_prescaler(uint32_t timer_clock, uint32_t target_frequency, bool is_dshot);
+    static uint32_t calculate_bitrate_prescaler(uint32_t timer_clock, uint32_t target_frequency, bool at_least_freq = false);
 
     /*
      * bit width values for different protocols
@@ -399,11 +417,12 @@ public:
 
     // See WS2812B spec for expected pulse widths
     static constexpr uint32_t NEOP_BIT_WIDTH_TICKS = 8;
-    static constexpr uint32_t NEOP_BIT_0_TICKS = 3;
+    static constexpr uint32_t NEOP_BIT_0_TICKS = 2;
     static constexpr uint32_t NEOP_BIT_1_TICKS = 6;
     // neopixel does not use pulse widths at all
     static constexpr uint32_t PROFI_BIT_0_TICKS = 7;
     static constexpr uint32_t PROFI_BIT_1_TICKS = 14;
+    static constexpr uint32_t PROFI_BIT_WIDTH_TICKS = 20;
 
     // suitably long LED output period to support high LED counts
     static constexpr uint32_t LED_OUTPUT_PERIOD_US = 10000;
@@ -414,6 +433,6 @@ protected:
     void append_to_banner(char banner_msg[], uint8_t banner_msg_len, output_mode out_mode, uint8_t low_ch, uint8_t high_ch) const;
     const char* get_output_mode_string(enum output_mode out_mode) const;
 
-    uint16_t _esc_pwm_min;
-    uint16_t _esc_pwm_max;
+    uint16_t _esc_pwm_min = 1000;
+    uint16_t _esc_pwm_max = 2000;
 };

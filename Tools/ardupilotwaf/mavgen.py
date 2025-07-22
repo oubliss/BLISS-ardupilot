@@ -1,13 +1,15 @@
 # encoding: utf-8
 # (c) Siddharth Bharat Purohit, 3DRobotics Inc.
 
+# flake8: noqa
+
 """
 The **mavgen.py** program is a code generator which creates mavlink header files.
 """
 
 from waflib import Logs, Task, Utils, Node
 from waflib.TaskGen import feature, before_method, extension
-import os, sys
+import sys
 import os.path
 from xml.etree import ElementTree as et
 
@@ -44,7 +46,7 @@ class mavgen(Task.Task):
                     node.parent.path_from(entry_point.parent),
                     path
                 )
-                if not path in names:
+                if path not in names:
                     names.append(path)
 
         return nodes, names
@@ -86,9 +88,6 @@ def process_mavgen(self):
 
     task = self.create_task('mavgen', inputs, outputs)
     task.env['OUTPUT_DIR'] = self.output_dir.abspath()
-
-    task.env.env = dict(os.environ)
-    task.env.env['PYTHONPATH'] = task.env.MAVLINK_DIR
 
 def configure(cfg):
     """

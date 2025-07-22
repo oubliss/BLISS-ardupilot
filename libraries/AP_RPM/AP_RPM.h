@@ -54,6 +54,9 @@ public:
 #if AP_RPM_GENERATOR_ENABLED
         RPM_TYPE_GENERATOR  = 6,
 #endif
+#if AP_RPM_DRONECAN_ENABLED
+        RPM_TYPE_DRONECAN = 7,
+#endif
 #if AP_RPM_SIM_ENABLED
         RPM_TYPE_SITL   = 10,
 #endif
@@ -104,9 +107,12 @@ public:
     // check settings are valid
     bool arming_checks(size_t buflen, char *buffer) const;
 
-private:
-    void convert_params(void);
+#if AP_RPM_STREAM_ENABLED
+    // Return the sensor id to use for streaming over DroneCAN, negative number disables
+    int8_t get_dronecan_sensor_id(uint8_t instance) const;
+#endif
 
+private:
     static AP_RPM *_singleton;
 
     RPM_State state[RPM_MAX_INSTANCES];

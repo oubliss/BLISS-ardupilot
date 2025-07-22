@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <type_traits>
+#include <new>
 
 // used to pack structures
 #define PACKED __attribute__((__packed__))
@@ -75,9 +76,6 @@
 #endif
 
 #define NORETURN __attribute__ ((noreturn))
-
-#define ToRad(x) radians(x)	// *pi/180
-#define ToDeg(x) degrees(x)	// *180/pi
 
 /* Declare and implement const and non-const versions of the array subscript
  * operator. The object is treated as an array of type_ values. */
@@ -142,6 +140,11 @@ template<typename s, size_t t> struct assert_storage_size {
     _assert_storage_size<s, sizeof(s), t> _member;
 };
 
+#define ASSERT_STORAGE_SIZE_JOIN( name, line ) ASSERT_STORAGE_SIZE_DO_JOIN( name, line )
+#define ASSERT_STORAGE_SIZE_DO_JOIN( name, line )  name ## line
+#define ASSERT_STORAGE_SIZE(structure, size) \
+    do { assert_storage_size<structure, size> ASSERT_STORAGE_SIZE_JOIN(assert_storage_sizex, __LINE__); (void)ASSERT_STORAGE_SIZE_JOIN(assert_storage_sizex, __LINE__); } while(false)
+
 ////////////////////////////////////////////////////////////////////////////////
 /// @name	Conversions
 ///
@@ -163,7 +166,7 @@ bool hex_to_uint8(uint8_t a, uint8_t &res);  // return the uint8 value of an asc
 size_t strncpy_noterm(char *dest, const char *src, size_t n);
 
 // return the numeric value of an ascii hex character
-int16_t char_to_hex(char a);
+uint8_t char_to_hex(char a);
 
 /*
   Bit manipulation
@@ -179,3 +182,11 @@ template <typename T> void BIT_CLEAR (T& value, uint8_t bitnumber) noexcept {
      ((value) &= ~((T)(1U) << (bitnumber)));
  }
 
+/*
+  See the comments in libraries/AP_Common/c++.cpp
+ */
+#ifndef NEW_NOTHROW
+#define NEW_NOTHROW new(std::nothrow)
+#endif
+
+void * WEAK mem_realloc(void *ptr, size_t old_size, size_t new_size);

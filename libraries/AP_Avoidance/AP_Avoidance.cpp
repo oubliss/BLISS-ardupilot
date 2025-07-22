@@ -1,6 +1,8 @@
-#include "AP_Avoidance.h"
+#include "AP_Avoidance_config.h"
 
-#if HAL_ADSB_ENABLED
+#if AP_ADSB_AVOIDANCE_ENABLED
+
+#include "AP_Avoidance.h"
 
 extern const AP_HAL::HAL& hal;
 
@@ -144,7 +146,7 @@ void AP_Avoidance::init(void)
 {
     debug("ADSB initialisation: %d obstacles", _obstacles_max.get());
     if (_obstacles == nullptr) {
-        _obstacles = new AP_Avoidance::Obstacle[_obstacles_max];
+        _obstacles = NEW_NOTHROW AP_Avoidance::Obstacle[_obstacles_max];
 
         if (_obstacles == nullptr) {
             // dynamic RAM allocation of _obstacles[] failed, disable gracefully
@@ -325,11 +327,11 @@ float closest_approach_z(const Location &my_loc,
     }
 
     debug("   time_horizon: (%d)", time_horizon);
-    debug("   delta pos: (%f) metres", delta_pos_d/100.0f);
+    debug("   delta pos: (%f) metres", delta_pos_d*0.01f);
     debug("   delta vel: (%f) m/s", delta_vel_d);
-    debug("   closest: (%f) metres", ret/100.0f);
+    debug("   closest: (%f) metres", ret*0.01f);
 
-    return ret/100.0f;
+    return ret*0.01f;
 }
 
 void AP_Avoidance::update_threat_level(const Location &my_loc,
@@ -396,6 +398,7 @@ MAV_COLLISION_THREAT_LEVEL AP_Avoidance::current_threat_level() const {
     return _obstacles[_current_most_serious_threat].threat_level;
 }
 
+#if HAL_GCS_ENABLED
 void AP_Avoidance::send_collision_all(const AP_Avoidance::Obstacle &threat, MAV_COLLISION_ACTION behaviour) const
 {
     const mavlink_collision_t packet{
@@ -409,6 +412,7 @@ void AP_Avoidance::send_collision_all(const AP_Avoidance::Obstacle &threat, MAV_
     };
     gcs().send_to_active_channels(MAVLINK_MSG_ID_COLLISION, (const char *)&packet);
 }
+#endif
 
 void AP_Avoidance::handle_threat_gcs_notify(AP_Avoidance::Obstacle *threat)
 {
@@ -657,7 +661,7 @@ bool AP_Avoidance::get_vector_perpendicular(const AP_Avoidance::Obstacle *obstac
 Vector3f AP_Avoidance::perpendicular_xyz(const Location &p1, const Vector3f &v1, const Location &p2)
 {
     const Vector2f delta_p_2d = p1.get_distance_NE(p2);
-    Vector3f delta_p_xyz = Vector3f(delta_p_2d[0],delta_p_2d[1],(p2.alt-p1.alt)/100.0f); //check this line
+    Vector3f delta_p_xyz = Vector3f(delta_p_2d[0],delta_p_2d[1],(p2.alt-p1.alt)*0.01f); //check this line
     Vector3f v1_xyz = Vector3f(v1[0], v1[1], -v1[2]);
     Vector3f ret = Vector3f::perpendicular(delta_p_xyz, v1_xyz);
     return ret;
@@ -687,4 +691,4 @@ AP_Avoidance *ap_avoidance()
 
 }
 
-#endif // HAL_ADSB_ENABLED
+#endif // AP_ADSB_AVOIDANCE_ENABLED

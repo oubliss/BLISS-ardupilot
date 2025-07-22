@@ -2,7 +2,7 @@
 #include "AP_InertialSensor_SITL.h"
 #include <AP_Logger/AP_Logger.h>
 #include <SITL/SITL.h>
-#include <fcntl.h>
+#include <AP_Filesystem/AP_Filesystem.h>
 
 #if AP_SIM_INS_ENABLED
 
@@ -20,7 +20,7 @@ AP_InertialSensor_SITL::AP_InertialSensor_SITL(AP_InertialSensor &imu, const uin
  */
 AP_InertialSensor_Backend *AP_InertialSensor_SITL::detect(AP_InertialSensor &_imu, const uint16_t sample_rates[])
 {
-    AP_InertialSensor_SITL *sensor = new AP_InertialSensor_SITL(_imu, sample_rates);
+    AP_InertialSensor_SITL *sensor = NEW_NOTHROW AP_InertialSensor_SITL(_imu, sample_rates);
     if (sensor == nullptr) {
         return nullptr;
     }
@@ -195,6 +195,9 @@ void AP_InertialSensor_SITL::generate_accel()
     }
 
     accel_accum /= nsamples;
+
+    accel_accum.rotate(sitl->imu_orientation);
+
     _rotate_and_correct_accel(accel_instance, accel_accum);
     _notify_new_accel_raw_sample(accel_instance, accel_accum, AP_HAL::micros64());
 
@@ -216,7 +219,7 @@ void AP_InertialSensor_SITL::generate_gyro()
         float r = radians(sitl->state.yawRate) + _gyro_drift;
 
         // minimum gyro noise is less than 1 bit
-        float gyro_noise = ToRad(0.04f);
+        float gyro_noise = radians(0.04f);
         constexpr float noise_variation = 0.05f;
         // this smears the individual motor peaks somewhat emulating physical motors
         constexpr float freq_variation = 0.12f;
@@ -230,7 +233,7 @@ void AP_InertialSensor_SITL::generate_gyro()
         // giving a gyro noise variation of 0.33 rad/s or 20deg/s over the full throttle range
         if (motors_on) {
             // add extra noise when the motors are on
-            gyro_noise = ToRad(sitl->gyro_noise[gyro_instance]) * sitl->throttle;
+            gyro_noise = radians(sitl->gyro_noise[gyro_instance]) * sitl->throttle;
         }
 
         // VIB_FREQ is a static vibration applied to each axis
@@ -298,6 +301,9 @@ void AP_InertialSensor_SITL::generate_gyro()
 #endif
     }
     gyro_accum /= nsamples;
+
+    gyro_accum.rotate(sitl->imu_orientation);
+
     _rotate_and_correct_gyro(gyro_instance, gyro_accum);
     _notify_new_gyro_raw_sample(gyro_instance, gyro_accum, AP_HAL::micros64());
 }
@@ -363,9 +369,9 @@ float AP_InertialSensor_SITL::gyro_drift(void) const
     double period  = sitl->drift_time * 2;
     double minutes = fmod(AP_HAL::micros64() / 60.0e6, period);
     if (minutes < period/2) {
-        return minutes * ToRad(sitl->drift_speed);
+        return minutes * radians(sitl->drift_speed);
     }
-    return (period - minutes) * ToRad(sitl->drift_speed);
+    return (period - minutes) * radians(sitl->drift_speed);
 }
 
 
@@ -409,8 +415,8 @@ void AP_InertialSensor_SITL::read_gyro_from_file()
 {
     if (gyro_fd == -1) {
         char namebuf[32];
-        snprintf(namebuf, 32, "/tmp/gyro%d.dat", gyro_instance);
-        gyro_fd = open(namebuf, O_RDONLY|O_CLOEXEC);
+        snprintf(namebuf, sizeof(namebuf), "/tmp/gyro%d.dat", gyro_instance);
+        gyro_fd = AP::FS().open(namebuf, O_RDONLY);
         if (gyro_fd == -1) {
             AP_HAL::panic("gyro data file %s not found", namebuf);
         }
@@ -426,10 +432,12 @@ void AP_InertialSensor_SITL::read_gyro_from_file()
 
     if (ret <= 0) {
         if (sitl->gyro_file_rw == SITL::SIM::INSFileMode::INS_FILE_READ_STOP_ON_EOF) {
+#if HAL_LOGGING_ENABLED
             //stop logging
             if (AP_Logger::get_singleton()) {
                 AP::logger().StopLogging();
             }
+#endif
             exit(0);
         }
         lseek(gyro_fd, 0, SEEK_SET);
@@ -460,7 +468,7 @@ void AP_InertialSensor_SITL::write_gyro_to_file(const Vector3f& gyro)
 {
     if (gyro_fd == -1) {
         char namebuf[32];
-        snprintf(namebuf, 32, "/tmp/gyro%d.dat", gyro_instance);
+        snprintf(namebuf, sizeof(namebuf), "/tmp/gyro%d.dat", gyro_instance);
         gyro_fd = open(namebuf, O_WRONLY|O_TRUNC|O_CREAT, S_IRWXU|S_IRGRP|S_IROTH);
     }
 
@@ -475,7 +483,7 @@ void AP_InertialSensor_SITL::read_accel_from_file()
 {
     if (accel_fd == -1) {
         char namebuf[32];
-        snprintf(namebuf, 32, "/tmp/accel%d.dat", accel_instance);
+        snprintf(namebuf, sizeof(namebuf), "/tmp/accel%d.dat", accel_instance);
         accel_fd = open(namebuf, O_RDONLY|O_CLOEXEC);
         if (accel_fd == -1) {
             AP_HAL::panic("accel data file %s not found", namebuf);
@@ -492,10 +500,12 @@ void AP_InertialSensor_SITL::read_accel_from_file()
 
     if (ret <= 0) {
         if (sitl->accel_file_rw == SITL::SIM::INSFileMode::INS_FILE_READ_STOP_ON_EOF) {
+#if HAL_LOGGING_ENABLED
             //stop logging
             if (AP_Logger::get_singleton()) {
                 AP::logger().StopLogging();
             }
+#endif
             exit(0);
         }
         lseek(accel_fd, 0, SEEK_SET);
@@ -530,7 +540,7 @@ void AP_InertialSensor_SITL::write_accel_to_file(const Vector3f& accel)
 
     if (accel_fd == -1) {
         char namebuf[32];
-        snprintf(namebuf, 32, "/tmp/accel%d.dat", accel_instance);
+        snprintf(namebuf, sizeof(namebuf), "/tmp/accel%d.dat", accel_instance);
         accel_fd = open(namebuf, O_WRONLY|O_TRUNC|O_CREAT, S_IRWXU|S_IRGRP|S_IROTH);
     }
 

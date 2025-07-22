@@ -15,7 +15,7 @@
 /*
   Simulator for the USD1 v1 Serial RangeFinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:USD1_v1 --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:USD1_v1 --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set RNGFND1_TYPE 11
@@ -35,6 +35,8 @@ namespace SITL {
 
 class RF_USD1_v1 : public RF_USD1 {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_USD1_v1(); }
 
     uint32_t packet_for_alt(uint16_t alt_cm, uint8_t *buffer, uint8_t buflen) override;
 

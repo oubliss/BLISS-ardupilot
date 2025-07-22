@@ -26,6 +26,8 @@ void ModeAcro::update()
 
 void ModeAcro::run()
 {
+    output_pilot_throttle();
+
     if (plane.g.acro_locking == 2 && plane.g.acro_yaw_rate > 0 &&
         plane.yawController.rate_control_enabled()) {
         // we can do 3D acro locking
@@ -65,10 +67,10 @@ void ModeAcro::stabilize()
         } else {
             acro_state.locked_roll_err += ahrs.get_gyro().x * plane.G_Dt;
         }
-        int32_t roll_error_cd = -ToDeg(acro_state.locked_roll_err)*100;
+        int32_t roll_error_cd = -degrees(acro_state.locked_roll_err)*100;
         plane.nav_roll_cd = ahrs.roll_sensor + roll_error_cd;
         // try to reduce the integrated angular error to zero. We set
-        // 'stabilze' to true, which disables the roll integrator
+        // 'stabilize' to true, which disables the roll integrator
         SRV_Channels::set_output_scaled(SRV_Channel::k_aileron, plane.rollController.get_servo_out(roll_error_cd,
                                                                                              speed_scaler,
                                                                                              true, false));

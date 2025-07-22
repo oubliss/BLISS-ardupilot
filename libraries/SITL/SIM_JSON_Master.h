@@ -18,16 +18,12 @@
 
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
+#include "SIM_config.h"
 
-#ifndef HAL_SIM_JSON_MASTER_ENABLED
-#define HAL_SIM_JSON_MASTER_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL)
-#endif
-
-#if HAL_SIM_JSON_MASTER_ENABLED
+#if AP_SIM_JSON_MASTER_ENABLED
 
 #include "SITL_Input.h"
-#include <AP_HAL/utility/Socket.h>
+#include <AP_HAL/utility/Socket_native.h>
 #include <AP_Math/AP_Math.h>
 
 namespace SITL {
@@ -48,8 +44,8 @@ public:
 private:
 
     struct socket_list {
-        SocketAPM sock_in{true};
-        SocketAPM sock_out{true};
+        SocketAPM_native sock_in{true};
+        SocketAPM_native sock_out{true};
         uint8_t instance;
         bool connected;
         socket_list *next;
@@ -63,4 +59,4 @@ private:
 
 }
 
-#endif  // HAL_SIM_JSON_MASTER_ENABLED
+#endif  // AP_SIM_JSON_MASTER_ENABLED

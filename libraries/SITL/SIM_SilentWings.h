@@ -15,15 +15,11 @@
 
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
+#include "SIM_config.h"
 
-#ifndef HAL_SIM_SILENTWINGS_ENABLED
-#define HAL_SIM_SILENTWINGS_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL)
-#endif
+#if AP_SIM_SILENTWINGS_ENABLED
 
-#if HAL_SIM_SILENTWINGS_ENABLED
-
-#include <AP_HAL/utility/Socket.h>
+#include <AP_HAL/utility/Socket_native.h>
 
 #include "SIM_Aircraft.h"
 
@@ -41,7 +37,7 @@ public:
 
     /* Static object creator */
     static Aircraft *create(const char *frame_str) {
-        return new SilentWings(frame_str);
+        return NEW_NOTHROW SilentWings(frame_str);
     }
 
 private:
@@ -109,7 +105,7 @@ private:
     /* ArduPlane's internal time when the first packet from Silent Wings is received. */
     uint64_t time_base_us;
 
-    SocketAPM sock;
+    SocketAPM_native sock;
     const char *_sw_address = "127.0.0.1";
     int _port_in = 6060;
     int _sw_port = 6070;
@@ -119,4 +115,4 @@ private:
 
 } // namespace SITL
 
-#endif // HAL_SIM_SILENTWINGS_ENABLED
+#endif  // AP_SIM_SILENTWINGS_ENABLED

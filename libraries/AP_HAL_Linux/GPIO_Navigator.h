@@ -1,4 +1,9 @@
 #pragma once
+
+#include <AP_HAL/HAL.h>
+
+#if HAL_LINUX_GPIO_NAVIGATOR_ENABLED
+
 #include "GPIO_RPI.h"
 
 using namespace Linux;
@@ -14,11 +19,12 @@ public:
     uint8_t read(uint8_t pin) override;
     void    write(uint8_t pin, uint8_t value) override;
 private:
-    uint8_t AllowedGPIOS[2] = {
-        RPI_GPIO_<26>(), // Aux Output for PWMs
+    uint8_t AllowedGPIOS[3] = {
+        RPI_GPIO_<18>(), // Aux Output for PWMs
+        RPI_GPIO_<26>(), // PCA OUTPUT_ENABLE
         RPI_GPIO_<27>()  // Leak detection
     };
     bool    pinAllowed(uint8_t pin);
 };
 
-
+#endif  // HAL_LINUX_GPIO_NAVIGATOR_ENABLED

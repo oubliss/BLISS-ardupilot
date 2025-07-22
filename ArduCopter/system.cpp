@@ -15,22 +15,6 @@ static void failsafe_check_static()
 
 void Copter::init_ardupilot()
 {
-
-#if STATS_ENABLED == ENABLED
-    // initialise stats module
-    g2.stats.init();
-#endif
-
-    BoardConfig.init();
-#if HAL_MAX_CAN_PROTOCOL_DRIVERS
-    can_mgr.init();
-#endif
-
-    // init cargo gripper
-#if AP_GRIPPER_ENABLED
-    g2.gripper.init();
-#endif
-
     // init winch
 #if AP_WINCH_ENABLED
     g2.winch.init();
@@ -43,20 +27,18 @@ void Copter::init_ardupilot()
     // initialise battery monitor
     battery.init();
 
+#if AP_RSSI_ENABLED
     // Init RSSI
     rssi.init();
-    
+#endif
+
     barometer.init();
 
     // setup telem slots with serial ports
     gcs().setup_uarts();
 
-#if OSD_ENABLED == ENABLED
+#if OSD_ENABLED
     osd.init();
-#endif
-
-#if LOGGING_ENABLED == ENABLED
-    log_init();
 #endif
 
     // update motor interlock state
@@ -72,9 +54,11 @@ void Copter::init_ardupilot()
 
     init_rc_in();               // sets up rc channels from radio
 
+#if AP_RANGEFINDER_ENABLED
     // initialise surface to be tracked in SurfaceTracking
     // must be before rc init to not override initial switch position
     surface_tracking.init((SurfaceTracking::Surface)copter.g2.surftrak_mode.get());
+#endif
 
     // allocate the motors class
     allocate_motors();
@@ -104,7 +88,7 @@ void Copter::init_ardupilot()
 
     // Do GPS init
     gps.set_log_gps_bit(MASK_LOG_GPS);
-    gps.init(serial_manager);
+    gps.init();
 
     AP::compass().set_log_bit(MASK_LOG_COMPASS);
     AP::compass().init();
@@ -113,7 +97,7 @@ void Copter::init_ardupilot()
     airspeed.set_log_bit(MASK_LOG_IMU);
 #endif
 
-#if AC_OAPATHPLANNER_ENABLED == ENABLED
+#if AP_OAPATHPLANNER_ENABLED
     g2.oa.init();
 #endif
 
@@ -153,7 +137,7 @@ void Copter::init_ardupilot()
     barometer.set_log_baro_bit(MASK_LOG_IMU);
     barometer.calibrate();
 
-#if RANGEFINDER_ENABLED == ENABLED
+#if AP_RANGEFINDER_ENABLED
     // initialise rangefinder
     init_rangefinder();
 #endif
@@ -168,31 +152,27 @@ void Copter::init_ardupilot()
     g2.beacon.init();
 #endif
 
-#if AP_RPM_ENABLED
-    // initialise AP_RPM library
-    rpm_sensor.init();
-#endif
-
-#if MODE_AUTO_ENABLED == ENABLED
+#if MODE_AUTO_ENABLED
     // initialise mission library
     mode_auto.mission.init();
+#if HAL_LOGGING_ENABLED
+    mode_auto.mission.set_log_start_mission_item_bit(MASK_LOG_CMD);
+#endif
 #endif
 
-#if MODE_SMARTRTL_ENABLED == ENABLED
+#if MODE_SMARTRTL_ENABLED
     // initialize SmartRTL
     g2.smart_rtl.init();
 #endif
 
+#if HAL_LOGGING_ENABLED
     // initialise AP_Logger library
     logger.setVehicle_Startup_Writer(FUNCTOR_BIND(&copter, &Copter::Log_Write_Vehicle_Startup_Messages, void));
+#endif
 
     startup_INS_ground();
 
-#if AP_SCRIPTING_ENABLED
-    g2.scripting.init();
-#endif // AP_SCRIPTING_ENABLED
-
-#if AC_CUSTOMCONTROL_MULTI_ENABLED == ENABLED
+#if AC_CUSTOMCONTROL_MULTI_ENABLED
     custom_control.init();
 #endif
 
@@ -207,11 +187,14 @@ void Copter::init_ardupilot()
 
     motors->output_min();  // output lowest possible value to motors
 
-    // attempt to set the intial_mode, else set to STABILIZE
+    // attempt to set the initial_mode, else set to STABILIZE
     if (!set_mode((enum Mode::Number)g.initial_mode.get(), ModeReason::INITIALISED)) {
         // set mode to STABILIZE will trigger mode change notification to pilot
         set_mode(Mode::Number::STABILIZE, ModeReason::UNAVAILABLE);
     }
+
+    pos_variance_filt.set_cutoff_frequency(g2.fs_ekf_filt_hz);
+    vel_variance_filt.set_cutoff_frequency(g2.fs_ekf_filt_hz);
 
     // flag that initialisation has completed
     ap.initialised = true;
@@ -254,16 +237,22 @@ bool Copter::ekf_has_absolute_position() const
         return false;
     }
 
-    // with EKF use filter status and ekf check
-    nav_filter_status filt_status = inertial_nav.get_filter_status();
-
     // if disarmed we accept a predicted horizontal position
     if (!motors->armed()) {
-        return ((filt_status.flags.horiz_pos_abs || filt_status.flags.pred_horiz_pos_abs));
-    } else {
-        // once armed we require a good absolute position and EKF must not be in const_pos_mode
-        return (filt_status.flags.horiz_pos_abs && !filt_status.flags.const_pos_mode);
+        if (ahrs.has_status(AP_AHRS::Status::HORIZ_POS_ABS)) {
+            return true;
+        }
+        if (ahrs.has_status(AP_AHRS::Status::PRED_HORIZ_POS_ABS)) {
+            return true;
+        }
+        return false;
     }
+
+    // once armed we require a good absolute position and EKF must not be in const_pos_mode
+    if (ahrs.has_status(AP_AHRS::Status::CONST_POS_MODE)) {
+        return false;
+    }
+    return ahrs.has_status(AP_AHRS::Status::HORIZ_POS_ABS);
 }
 
 // ekf_has_relative_position - returns true if the EKF can provide a position estimate relative to it's starting position
@@ -293,15 +282,18 @@ bool Copter::ekf_has_relative_position() const
         return false;
     }
 
-    // get filter status from EKF
-    nav_filter_status filt_status = inertial_nav.get_filter_status();
-
     // if disarmed we accept a predicted horizontal relative position
     if (!motors->armed()) {
-        return (filt_status.flags.pred_horiz_pos_rel);
-    } else {
-        return (filt_status.flags.horiz_pos_rel && !filt_status.flags.const_pos_mode);
+        return ahrs.has_status(AP_AHRS::Status::PRED_HORIZ_POS_REL);
     }
+
+    if (ahrs.has_status(AP_AHRS::Status::CONST_POS_MODE)) {
+        return false;
+    }
+    if (!ahrs.has_status(AP_AHRS::Status::HORIZ_POS_REL)) {
+        return false;
+    }
+    return true;
 }
 
 // returns true if the ekf has a good altitude estimate (required for modes which do AltHold)
@@ -312,11 +304,14 @@ bool Copter::ekf_alt_ok() const
         return false;
     }
 
-    // with EKF use filter status and ekf check
-    nav_filter_status filt_status = inertial_nav.get_filter_status();
-
     // require both vertical velocity and position
-    return (filt_status.flags.vert_vel && filt_status.flags.vert_pos);
+    if (!ahrs.has_status(AP_AHRS::Status::VERT_POS)) {
+        return false;
+    }
+    if (!ahrs.has_status(AP_AHRS::Status::VERT_VEL)) {
+        return false;
+    }
+    return true;
 }
 
 // update_auto_armed - update status of auto_armed flag
@@ -330,7 +325,7 @@ void Copter::update_auto_armed()
             return;
         }
         // if in stabilize or acro flight mode and throttle is zero, auto-armed should become false
-        if(flightmode->has_manual_throttle() && ap.throttle_zero && !failsafe.radio) {
+        if (flightmode->has_manual_throttle() && ap.throttle_zero && rc().has_valid_input()) {
             set_auto_armed(false);
         }
 
@@ -352,18 +347,15 @@ void Copter::update_auto_armed()
     }
 }
 
+#if HAL_LOGGING_ENABLED
 /*
   should we log a message type now?
  */
 bool Copter::should_log(uint32_t mask)
 {
-#if LOGGING_ENABLED == ENABLED
-    ap.logging_started = logger.logging_started();
     return logger.should_log(mask);
-#else
-    return false;
-#endif
 }
+#endif
 
 /*
   allocate the motors class
@@ -381,54 +373,56 @@ void Copter::allocate_motors(void)
         case AP_Motors::MOTOR_FRAME_DECA:
         case AP_Motors::MOTOR_FRAME_SCRIPTING_MATRIX:
         default:
-            motors = new AP_MotorsMatrix(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsMatrix(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsMatrix::var_info;
             break;
+#if AP_MOTORS_TRI_ENABLED
         case AP_Motors::MOTOR_FRAME_TRI:
-            motors = new AP_MotorsTri(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsTri(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsTri::var_info;
             AP_Param::set_frame_type_flags(AP_PARAM_FRAME_TRICOPTER);
             break;
+#endif  // AP_MOTORS_TRI_ENABLED
         case AP_Motors::MOTOR_FRAME_SINGLE:
-            motors = new AP_MotorsSingle(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsSingle(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsSingle::var_info;
             break;
         case AP_Motors::MOTOR_FRAME_COAX:
-            motors = new AP_MotorsCoax(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsCoax(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsCoax::var_info;
             break;
         case AP_Motors::MOTOR_FRAME_TAILSITTER:
-            motors = new AP_MotorsTailsitter(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsTailsitter(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsTailsitter::var_info;
             break;
         case AP_Motors::MOTOR_FRAME_6DOF_SCRIPTING:
 #if AP_SCRIPTING_ENABLED
-            motors = new AP_MotorsMatrix_6DoF_Scripting(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsMatrix_6DoF_Scripting(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsMatrix_6DoF_Scripting::var_info;
 #endif // AP_SCRIPTING_ENABLED
             break;
         case AP_Motors::MOTOR_FRAME_DYNAMIC_SCRIPTING_MATRIX:
 #if AP_SCRIPTING_ENABLED
-            motors = new AP_MotorsMatrix_Scripting_Dynamic(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsMatrix_Scripting_Dynamic(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsMatrix_Scripting_Dynamic::var_info;
 #endif // AP_SCRIPTING_ENABLED
             break;
 #else // FRAME_CONFIG == HELI_FRAME
         case AP_Motors::MOTOR_FRAME_HELI_DUAL:
-            motors = new AP_MotorsHeli_Dual(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsHeli_Dual(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsHeli_Dual::var_info;
             AP_Param::set_frame_type_flags(AP_PARAM_FRAME_HELI);
             break;
 
         case AP_Motors::MOTOR_FRAME_HELI_QUAD:
-            motors = new AP_MotorsHeli_Quad(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsHeli_Quad(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsHeli_Quad::var_info;
             AP_Param::set_frame_type_flags(AP_PARAM_FRAME_HELI);
             break;
             
         case AP_Motors::MOTOR_FRAME_HELI:
         default:
-            motors = new AP_MotorsHeli_Single(copter.scheduler.get_loop_rate_hz());
+            motors = NEW_NOTHROW AP_MotorsHeli_Single(copter.scheduler.get_loop_rate_hz());
             motors_var_info = AP_MotorsHeli_Single::var_info;
             AP_Param::set_frame_type_flags(AP_PARAM_FRAME_HELI);
             break;
@@ -444,51 +438,49 @@ void Copter::allocate_motors(void)
         AP_BoardConfig::allocation_error("AP_AHRS_View");
     }
 
-    const struct AP_Param::GroupInfo *ac_var_info;
-
 #if FRAME_CONFIG != HELI_FRAME
     if ((AP_Motors::motor_frame_class)g2.frame_class.get() == AP_Motors::MOTOR_FRAME_6DOF_SCRIPTING) {
 #if AP_SCRIPTING_ENABLED
-        attitude_control = new AC_AttitudeControl_Multi_6DoF(*ahrs_view, aparm, *motors);
-        ac_var_info = AC_AttitudeControl_Multi_6DoF::var_info;
+        attitude_control = NEW_NOTHROW AC_AttitudeControl_Multi_6DoF(*ahrs_view, aparm, *motors);
+        attitude_control_var_info = AC_AttitudeControl_Multi_6DoF::var_info;
 #endif // AP_SCRIPTING_ENABLED
     } else {
-        attitude_control = new AC_AttitudeControl_Multi(*ahrs_view, aparm, *motors);
-        ac_var_info = AC_AttitudeControl_Multi::var_info;
+        attitude_control = NEW_NOTHROW AC_AttitudeControl_Multi(*ahrs_view, aparm, *motors);
+        attitude_control_var_info = AC_AttitudeControl_Multi::var_info;
     }
 #else
-    attitude_control = new AC_AttitudeControl_Heli(*ahrs_view, aparm, *motors);
-    ac_var_info = AC_AttitudeControl_Heli::var_info;
+    attitude_control = NEW_NOTHROW AC_AttitudeControl_Heli(*ahrs_view, aparm, *motors);
+    attitude_control_var_info = AC_AttitudeControl_Heli::var_info;
 #endif
     if (attitude_control == nullptr) {
         AP_BoardConfig::allocation_error("AttitudeControl");
     }
-    AP_Param::load_object_from_eeprom(attitude_control, ac_var_info);
+    AP_Param::load_object_from_eeprom(attitude_control, attitude_control_var_info);
         
-    pos_control = new AC_PosControl(*ahrs_view, inertial_nav, *motors, *attitude_control);
+    pos_control = NEW_NOTHROW AC_PosControl(*ahrs_view, *motors, *attitude_control);
     if (pos_control == nullptr) {
         AP_BoardConfig::allocation_error("PosControl");
     }
     AP_Param::load_object_from_eeprom(pos_control, pos_control->var_info);
 
-#if AC_OAPATHPLANNER_ENABLED == ENABLED
-    wp_nav = new AC_WPNav_OA(inertial_nav, *ahrs_view, *pos_control, *attitude_control);
+#if AP_OAPATHPLANNER_ENABLED
+    wp_nav = NEW_NOTHROW AC_WPNav_OA(*ahrs_view, *pos_control, *attitude_control);
 #else
-    wp_nav = new AC_WPNav(inertial_nav, *ahrs_view, *pos_control, *attitude_control);
+    wp_nav = NEW_NOTHROW AC_WPNav(*ahrs_view, *pos_control, *attitude_control);
 #endif
     if (wp_nav == nullptr) {
         AP_BoardConfig::allocation_error("WPNav");
     }
     AP_Param::load_object_from_eeprom(wp_nav, wp_nav->var_info);
 
-    loiter_nav = new AC_Loiter(inertial_nav, *ahrs_view, *pos_control, *attitude_control);
+    loiter_nav = NEW_NOTHROW AC_Loiter(*ahrs_view, *pos_control, *attitude_control);
     if (loiter_nav == nullptr) {
         AP_BoardConfig::allocation_error("LoiterNav");
     }
     AP_Param::load_object_from_eeprom(loiter_nav, loiter_nav->var_info);
 
-#if MODE_CIRCLE_ENABLED == ENABLED
-    circle_nav = new AC_Circle(inertial_nav, *ahrs_view, *pos_control);
+#if MODE_CIRCLE_ENABLED
+    circle_nav = NEW_NOTHROW AC_Circle(*ahrs_view, *pos_control);
     if (circle_nav == nullptr) {
         AP_BoardConfig::allocation_error("CircleNav");
     }
@@ -523,7 +515,7 @@ void Copter::allocate_motors(void)
     // upgrade parameters. This must be done after allocating the objects
     convert_pid_parameters();
 #if FRAME_CONFIG == HELI_FRAME
-    convert_tradheli_parameters();
+    motors->heli_motors_param_conversions();
 #endif
 
 #if HAL_PROXIMITY_ENABLED

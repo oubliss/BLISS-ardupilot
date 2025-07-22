@@ -1,9 +1,14 @@
-#include "SIM_RAMTRON.h"
+#include "SIM_config.h"
 
 #if AP_SIM_RAMTRON_ENABLED
 
+#include "SIM_RAMTRON.h"
+
 #include <errno.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #include <AP_HAL_SITL/AP_HAL_SITL.h>
 

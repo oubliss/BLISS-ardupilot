@@ -18,10 +18,12 @@
 
 #include "SIM_JSON_Master.h"
 
-#if HAL_SIM_JSON_MASTER_ENABLED
+#if AP_SIM_JSON_MASTER_ENABLED
 
 #include <AP_Logger/AP_Logger.h>
 #include <errno.h>
+#include <stdio.h>
+#include <SITL/SITL.h>
 
 using namespace SITL;
 
@@ -35,19 +37,19 @@ void JSON_Master::init(const int32_t num_slaves)
         uint16_t port = 9002 + 10 * i;
 
         if (!list->sock_in.reuseaddress()) {
-            AP_HAL::panic("JSON master: socket reuseaddress failed on port: %d - %s\n", port, strerror(errno));
+            AP_HAL::panic("JSON master: socket reuseaddress failed on port: %d - %s", port, strerror(errno));
         }
 
         if (!list->sock_in.bind("127.0.0.1", port)) {
-            AP_HAL::panic("JSON master: socket reuseaddress failed on port: %d - %s\n", port, strerror(errno));
+            AP_HAL::panic("JSON master: socket reuseaddress failed on port: %d - %s", port, strerror(errno));
         }
 
         if (!list->sock_in.set_blocking(false)) {
-            AP_HAL::panic( "JSON master: socket set_blocking(false) failed on port: %d - %s\n", port, strerror(errno));
+            AP_HAL::panic( "JSON master: socket set_blocking(false) failed on port: %d - %s", port, strerror(errno));
         }
 
         printf("Slave %u: listening on %u\n", list->instance, port);
-        list->next = new socket_list;
+        list->next = NEW_NOTHROW socket_list;
         list = list->next;
 
         initialized = true;
@@ -97,6 +99,7 @@ void JSON_Master::receive(struct sitl_input &input)
             }
         }
 
+#if HAL_LOGGING_ENABLED
         const bool use_servos = list->instance == master_instance;
 
 // @LoggerMessage: SLV1
@@ -156,6 +159,7 @@ void JSON_Master::receive(struct sitl_input &input)
                        buffer.pwm[11],
                        buffer.pwm[12],
                        buffer.pwm[13]);
+#endif
 
         if (list->instance == master_instance) {
             // Use the servo outs from this instance
@@ -187,4 +191,4 @@ void JSON_Master::send(const struct sitl_fdm &output, const Vector3d &position)
 }
 
 
-#endif  // HAL_SIM_JSON_MASTER_ENABLED
+#endif  // AP_SIM_JSON_MASTER_ENABLED

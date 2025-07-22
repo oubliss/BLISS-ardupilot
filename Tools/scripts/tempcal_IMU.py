@@ -1,4 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
+
+# flake8: noqa
+
 '''
 Create temperature calibration parameters for IMUs based on log data.
 '''
@@ -65,14 +68,14 @@ class Coefficients:
     def set_acoeff(self, imu, axis, order, value):
         if imu not in self.acoef:
             self.acoef[imu] = {}
-        if not axis in self.acoef[imu]:
+        if axis not in self.acoef[imu]:
             self.acoef[imu][axis] = [0]*4
         self.acoef[imu][axis][POLY_ORDER-order] = value
 
     def set_gcoeff(self, imu, axis, order, value):
         if imu not in self.gcoef:
             self.gcoef[imu] = {}
-        if not axis in self.gcoef[imu]:
+        if axis not in self.gcoef[imu]:
             self.gcoef[imu][axis] = [0]*4
         self.gcoef[imu][axis][POLY_ORDER-order] = value
 
@@ -107,7 +110,7 @@ class Coefficients:
             return 0.0
         if cal_temp < -80:
             return 0.0
-        if not axis in coeff:
+        if axis not in coeff:
             return 0.0
         temperature = constrain(temperature, self.tmin[imu], self.tmax[imu])
         cal_temp = constrain(cal_temp, self.tmin[imu], self.tmax[imu])

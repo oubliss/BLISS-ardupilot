@@ -2,11 +2,14 @@
    AP_Logger Remote(via MAVLink) logging
 */
 
-#include "AP_Logger_MAVLink.h"
+#include "AP_Logger_config.h"
 
 #if HAL_LOGGING_MAVLINK_ENABLED
 
+#include "AP_Logger_MAVLink.h"
+
 #include "LogStructure.h"
+#include <AP_Logger/AP_Logger.h>
 
 #define REMOTE_LOG_DEBUGGING 0
 
@@ -22,6 +25,13 @@
 
 extern const AP_HAL::HAL& hal;
 
+AP_Logger_MAVLink::AP_Logger_MAVLink(AP_Logger &front, LoggerMessageWriter_DFLogStart *writer) :
+    AP_Logger_Backend(front, writer),
+    _max_blocks_per_send_blocks(8)
+{
+    _blockcount = 1024*((uint8_t)_front._params.mav_bufsize) / sizeof(struct dm_block);
+    // ::fprintf(stderr, "DM: Using %u blocks\n", _blockcount);
+}
 
 // initialisation
 void AP_Logger_MAVLink::Init()
@@ -123,11 +133,6 @@ bool AP_Logger_MAVLink::_WritePrioritisedBlock(const void *pBuffer, uint16_t siz
 {
     if (!semaphore.take_nonblocking()) {
         _dropped++;
-        return false;
-    }
-
-    if (! WriteBlockCheckStartupMessages()) {
-        semaphore.give();
         return false;
     }
 
@@ -322,13 +327,13 @@ void AP_Logger_MAVLink::stats_reset() {
     stats.collection_count = 0;
 }
 
-void AP_Logger_MAVLink::Write_logger_MAV(AP_Logger_MAVLink &logger_mav)
+void AP_Logger_MAVLink::Write_DMS(AP_Logger_MAVLink &logger_mav)
 {
     if (logger_mav.stats.collection_count == 0) {
         return;
     }
-    const struct log_MAV_Stats pkt{
-        LOG_PACKET_HEADER_INIT(LOG_MAV_STATS),
+    const struct log_DMS pkt{
+        LOG_PACKET_HEADER_INIT(LOG_DMS_MSG),
         timestamp         : AP_HAL::micros64(),
         seqno             : logger_mav._next_seq_num-1,
         dropped           : logger_mav._dropped,
@@ -355,7 +360,7 @@ void AP_Logger_MAVLink::stats_log()
     if (stats.collection_count == 0) {
         return;
     }
-    Write_logger_MAV(*this);
+    Write_DMS(*this);
 #if REMOTE_LOG_DEBUGGING
     printf("D:%d Retry:%d Resent:%d SF:%d/%d/%d SP:%d/%d/%d SS:%d/%d/%d SR:%d/%d/%d\n",
            _dropped,
@@ -535,7 +540,7 @@ void AP_Logger_MAVLink::periodic_1Hz()
          _front._params.disarm_ratemax > 0 ||
          _front._log_pause)) {
         // setup rate limiting if log rate max > 0Hz or log pause of streaming entries is requested
-        rate_limiter = new AP_Logger_RateLimiter(_front, _front._params.mav_ratemax, _front._params.disarm_ratemax);
+        rate_limiter = NEW_NOTHROW AP_Logger_RateLimiter(_front, _front._params.mav_ratemax, _front._params.disarm_ratemax);
     }
 
     if (_sending_to_client &&
@@ -567,13 +572,6 @@ bool AP_Logger_MAVLink::send_log_block(struct dm_block &block)
         return false;
     }
 
-#if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-    // deliberately fail 10% of the time in SITL:
-    if ((rand() % 100 + 1) < 10) {
-        return false;
-    }
-#endif
-    
 #if DF_MAVLINK_DISABLE_INTERRUPTS
     void *istate = hal.scheduler->disable_interrupts_save();
 #endif

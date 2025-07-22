@@ -18,15 +18,11 @@
 
 #pragma once
 
-#include <AP_HAL/AP_HAL_Boards.h>
+#include "SIM_config.h"
 
-#ifndef HAL_SIM_LAST_LETTER_ENABLED
-#define HAL_SIM_LAST_LETTER_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL)
-#endif
+#if AP_SIM_LAST_LETTER_ENABLED
 
-#if HAL_SIM_LAST_LETTER_ENABLED
-
-#include <AP_HAL/utility/Socket.h>
+#include <AP_HAL/utility/Socket_native.h>
 
 #include "SIM_Aircraft.h"
 
@@ -44,7 +40,7 @@ public:
 
     /* static object creator */
     static Aircraft *create(const char *frame_str) {
-        return new last_letter(frame_str);
+        return NEW_NOTHROW last_letter(frame_str);
     }
 
 private:
@@ -77,9 +73,9 @@ private:
     void start_last_letter(void);
 
     uint64_t last_timestamp_us;
-    SocketAPM sock;
+    SocketAPM_native sock;
 };
 
 } // namespace SITL
 
-#endif  // HAL_SIM_LAST_LETTER_ENABLED
+#endif  // AP_SIM_LAST_LETTER_ENABLED

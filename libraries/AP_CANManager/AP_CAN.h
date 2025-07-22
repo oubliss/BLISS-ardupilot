@@ -27,5 +27,7 @@ public:
         Scripting = 10,
         Benewake = 11,
         Scripting2 = 12,
+        TOFSenseP = 13,
+        RadarCAN = 14,  // used by NanoRadar and Hexsoon
     };
 };

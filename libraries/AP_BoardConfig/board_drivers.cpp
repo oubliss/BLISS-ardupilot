@@ -35,7 +35,7 @@ void AP_BoardConfig::board_init_safety()
 {
     bool force_safety_off = (state.safety_enable.get() == 0);
     if (!force_safety_off && hal.util->was_watchdog_safety_off()) {
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Forcing safety off for watchdog\n");
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Forcing safety off for watchdog");
         force_safety_off = true;
     }
     if (force_safety_off) {
@@ -89,27 +89,18 @@ void AP_BoardConfig::board_setup_drivers(void)
     case PX4_BOARD_PIXHAWK2:
     case PX4_BOARD_FMUV5:
     case PX4_BOARD_FMUV6:
-    case PX4_BOARD_SP01:
-    case PX4_BOARD_PIXRACER:
     case PX4_BOARD_PHMINI:
     case PX4_BOARD_AUAV21:
     case PX4_BOARD_PH2SLIM:
-    case VRX_BOARD_BRAIN51:
-    case VRX_BOARD_BRAIN52:
-    case VRX_BOARD_BRAIN52E:
-    case VRX_BOARD_UBRAIN51:
-    case VRX_BOARD_UBRAIN52:
-    case VRX_BOARD_CORE10:
-    case VRX_BOARD_BRAIN54:
     case PX4_BOARD_AEROFC:
-    case PX4_BOARD_PIXHAWK_PRO:
-    case PX4_BOARD_PCNC1:
     case PX4_BOARD_MINDPXV2:
     case FMUV6_BOARD_HOLYBRO_6X:
+    case FMUV6_BOARD_HOLYBRO_6X_REV6:
+    case FMUV6_BOARD_HOLYBRO_6X_45686:
     case FMUV6_BOARD_CUAV_6X:
         break;
     default:
-        config_error("Unknown board type");
+        config_error("Unknown board type %u", px4_configured_board);
         break;
     }
 }
@@ -129,17 +120,15 @@ bool AP_BoardConfig::spi_check_register(const char *devname, uint8_t regnum, uin
         return false;
     }
     dev->set_read_flag(read_flag);
-    dev->get_semaphore()->take_blocking();
+    WITH_SEMAPHORE(dev->get_semaphore());
     dev->set_speed(AP_HAL::Device::SPEED_LOW);
     uint8_t v;
     if (!dev->read_registers(regnum, &v, 1)) {
 #if SPI_PROBE_DEBUG
         hal.console->printf("%s: reg %02x read fail\n", devname, (unsigned)regnum);
 #endif
-        dev->get_semaphore()->give();
         return false;
     }
-    dev->get_semaphore()->give();
 #if SPI_PROBE_DEBUG
     hal.console->printf("%s: reg %02x expected:%02x got:%02x\n", devname, (unsigned)regnum, (unsigned)value, (unsigned)v);
 #endif
@@ -161,7 +150,7 @@ bool AP_BoardConfig::spi_check_register_inv2(const char *devname, uint8_t regnum
         return false;
     }
     dev->set_read_flag(read_flag);
-    dev->get_semaphore()->take_blocking();
+    WITH_SEMAPHORE(dev->get_semaphore());
     dev->set_speed(AP_HAL::Device::SPEED_LOW);
     uint8_t v;
     // select bank 0 for who am i
@@ -170,10 +159,8 @@ bool AP_BoardConfig::spi_check_register_inv2(const char *devname, uint8_t regnum
 #if SPI_PROBE_DEBUG
         hal.console->printf("%s: reg %02x read fail\n", devname, (unsigned)regnum);
 #endif
-        dev->get_semaphore()->give();
         return false;
     }
-    dev->get_semaphore()->give();
 #if SPI_PROBE_DEBUG
     hal.console->printf("%s: reg %02x expected:%02x got:%02x\n", devname, (unsigned)regnum, (unsigned)value, (unsigned)v);
 #endif
@@ -195,7 +182,7 @@ bool AP_BoardConfig::check_ms5611(const char* devname) {
     if (!dev_sem) {
         return false;
     }
-    dev_sem->take_blocking();
+    WITH_SEMAPHORE(dev_sem);
 
     static const uint8_t CMD_MS56XX_RESET = 0x1E;
     static const uint8_t CMD_MS56XX_PROM = 0xA0;
@@ -209,7 +196,6 @@ bool AP_BoardConfig::check_ms5611(const char* devname) {
         const uint8_t reg = CMD_MS56XX_PROM + (i << 1);
         uint8_t val[2];
         if (!dev->transfer(&reg, 1, val, sizeof(val))) {
-            dev_sem->give();
 #if SPI_PROBE_DEBUG
             hal.console->printf("%s: transfer fail\n", devname);
 #endif
@@ -221,7 +207,6 @@ bool AP_BoardConfig::check_ms5611(const char* devname) {
             all_zero = false;
         }
     }
-    dev_sem->give();
 
     uint16_t crc_read = prom[7]&0xf;
     prom[7] &= 0xff00;
@@ -257,12 +242,13 @@ bool AP_BoardConfig::check_ms5611(const char* devname) {
 #define INV2_WHOAMI_ICM20649 0xE1
 
 #define INV3REG_WHOAMI        0x75
-#define INV3REG_456_WHOAMI        0x72
+#define INV3REG_456_WHOAMI    0x72
 
 #define INV3_WHOAMI_ICM42688  0x47
 #define INV3_WHOAMI_ICM42670  0x67
-
 #define INV3_WHOAMI_ICM45686  0xE9
+#define INV3_WHOAMI_IIM42652  0x6f
+
 /*
   validation of the board type
  */
@@ -349,38 +335,15 @@ void AP_BoardConfig::board_autodetect(void)
     } else {
         config_error("Unable to detect board type");
     }
-#elif defined(HAL_CHIBIOS_ARCH_FMUV4)
-    // only one choice
-    state.board_type.set_and_notify(PX4_BOARD_PIXRACER);
-    DEV_PRINTF("Detected Pixracer\n");
 #elif defined(HAL_CHIBIOS_ARCH_MINDPXV2)
     // only one choice
     state.board_type.set_and_notify(PX4_BOARD_MINDPXV2);
     DEV_PRINTF("Detected MindPX-V2\n");
-#elif defined(HAL_CHIBIOS_ARCH_FMUV4PRO)
-    // only one choice
-    state.board_type.set_and_notify(PX4_BOARD_PIXHAWK_PRO);
-    DEV_PRINTF("Detected Pixhawk Pro\n");	
 #elif defined(HAL_CHIBIOS_ARCH_FMUV5)
     state.board_type.set_and_notify(PX4_BOARD_FMUV5);
     DEV_PRINTF("Detected FMUv5\n");
 #elif defined(HAL_CHIBIOS_ARCH_FMUV6)
     detect_fmuv6_variant();
-#elif defined(HAL_CHIBIOS_ARCH_BRAINV51)
-    state.board_type.set_and_notify(VRX_BOARD_BRAIN51);
-    DEV_PRINTF("Detected VR Brain 5.1\n");
-#elif defined(HAL_CHIBIOS_ARCH_BRAINV52)
-    state.board_type.set_and_notify(VRX_BOARD_BRAIN52);
-    DEV_PRINTF("Detected VR Brain 5.2\n");
-#elif defined(HAL_CHIBIOS_ARCH_UBRAINV51)
-    state.board_type.set_and_notify(VRX_BOARD_UBRAIN51);
-    DEV_PRINTF("Detected VR Micro Brain 5.1\n");
-#elif defined(HAL_CHIBIOS_ARCH_COREV10)
-    state.board_type.set_and_notify(VRX_BOARD_CORE10);
-    DEV_PRINTF("Detected VR Core 1.0\n");
-#elif defined(HAL_CHIBIOS_ARCH_BRAINV54)
-    state.board_type.set_and_notify(VRX_BOARD_BRAIN54);
-    DEV_PRINTF("Detected VR Brain 5.4\n");
 #endif
 
 }
@@ -416,6 +379,21 @@ void AP_BoardConfig::board_setup_uart()
 #ifdef HAL_HAVE_RTSCTS_SERIAL5
     if (hal.serial(5) != nullptr) {
         hal.serial(5)->set_flow_control((AP_HAL::UARTDriver::flow_control)state.ser_rtscts[5].get());
+    }
+#endif
+#ifdef HAL_HAVE_RTSCTS_SERIAL6
+    if (hal.serial(6) != nullptr) {
+        hal.serial(6)->set_flow_control((AP_HAL::UARTDriver::flow_control)state.ser_rtscts[6].get());
+    }
+#endif
+#ifdef HAL_HAVE_RTSCTS_SERIAL7
+    if (hal.serial(7) != nullptr) {
+        hal.serial(7)->set_flow_control((AP_HAL::UARTDriver::flow_control)state.ser_rtscts[7].get());
+    }
+#endif
+#ifdef HAL_HAVE_RTSCTS_SERIAL8
+    if (hal.serial(8) != nullptr) {
+        hal.serial(8)->set_flow_control((AP_HAL::UARTDriver::flow_control)state.ser_rtscts[8].get());
     }
 #endif
 #endif
@@ -503,7 +481,15 @@ void AP_BoardConfig::detect_fmuv6_variant()
         state.board_type.set_and_notify(FMUV6_BOARD_CUAV_6X);
         DEV_PRINTF("Detected CUAV 6X\n");
         AP_Param::load_defaults_file("@ROMFS/param/CUAV_V6X_defaults.parm", false);
+    } else if (spi_check_register("icm45686-1", INV3REG_456_WHOAMI, INV3_WHOAMI_ICM45686) &&
+               spi_check_register("icm45686-2", INV3REG_456_WHOAMI, INV3_WHOAMI_ICM45686) &&
+               spi_check_register("icm45686-3", INV3REG_456_WHOAMI, INV3_WHOAMI_ICM45686)) {
+        state.board_type.set_and_notify(FMUV6_BOARD_HOLYBRO_6X_45686);
+        DEV_PRINTF("Detected Holybro 6X_45686\n");
+    } else if (spi_check_register("iim42652", INV3REG_WHOAMI, INV3_WHOAMI_IIM42652) &&
+               spi_check_register("icm45686", INV3REG_456_WHOAMI, INV3_WHOAMI_ICM45686)) {
+        state.board_type.set_and_notify(FMUV6_BOARD_HOLYBRO_6X_REV6);
+        DEV_PRINTF("Detected Holybro 6X_Rev6\n");
     }
-
 }
 #endif

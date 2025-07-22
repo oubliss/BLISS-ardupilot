@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 
 import errno
 import socket
@@ -43,21 +43,6 @@ class udp_socket(object):
         except socket.error:
             pass
 
-
-def ft2m(x):
-    return x * 0.3048
-
-
-def m2ft(x):
-    return x / 0.3048
-
-
-def kt2mps(x):
-    return x * 0.514444444
-
-
-def mps2kt(x):
-    return x / 0.514444444
 
 udp = udp_socket("127.0.0.1:5123")
 fgout = udp_socket("127.0.0.1:5124", is_input=False)

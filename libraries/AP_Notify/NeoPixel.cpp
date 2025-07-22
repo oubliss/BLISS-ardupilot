@@ -43,7 +43,7 @@ uint16_t NeoPixel::init_ports()
 {
     uint16_t mask = 0;
     for (uint16_t i=0; i<AP_NOTIFY_NEOPIXEL_MAX_INSTANCES; i++) {
-        const SRV_Channel::Aux_servo_function_t fn = (SRV_Channel::Aux_servo_function_t)((uint8_t)SRV_Channel::k_LED_neopixel1 + i);
+        const SRV_Channel::Function fn = (SRV_Channel::Function)((uint8_t)SRV_Channel::k_LED_neopixel1 + i);
         if (!SRV_Channels::function_assigned(fn)) {
             continue;
         }
@@ -61,7 +61,11 @@ uint16_t NeoPixel::init_ports()
 
     for (uint16_t chan=0; chan<16; chan++) {
         if ((1U<<chan) & mask) {
-            led->set_num_neopixel(chan+1, (pNotify->get_led_len()));
+            if (pNotify->get_led_type() & AP_Notify::Notify_LED_NeoPixel) {
+                led->set_num_neopixel(chan+1, pNotify->get_led_len());
+            } else if (pNotify->get_led_type() & AP_Notify::Notify_LED_NeoPixelRGB) {
+                led->set_num_neopixel_rgb(chan+1, pNotify->get_led_len());
+            }
         }
     }
 

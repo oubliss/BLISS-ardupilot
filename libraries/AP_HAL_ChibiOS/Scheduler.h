@@ -26,9 +26,9 @@
 #define APM_MAIN_PRIORITY       180
 #define APM_TIMER_PRIORITY      181
 #define APM_RCOUT_PRIORITY      181
-#define APM_RCIN_PRIORITY       177
 #define APM_LED_PRIORITY         60
 #define APM_UART_PRIORITY        60
+#define APM_NET_PRIORITY         60
 #define APM_UART_UNBUFFERED_PRIORITY 181
 #define APM_STORAGE_PRIORITY     59
 #define APM_IO_PRIORITY          58
@@ -40,6 +40,10 @@
  */
 #ifndef APM_MAIN_PRIORITY_BOOST
 #define APM_MAIN_PRIORITY_BOOST 182
+#endif
+
+#ifndef APM_RCIN_PRIORITY
+#define APM_RCIN_PRIORITY      177
 #endif
 
 #ifndef APM_SPI_PRIORITY
@@ -80,6 +84,13 @@
 #define MONITOR_THD_WA_SIZE 1024
 #endif
 
+// MEMCHECK_ENABLED checks the bottom 1kB of RAM on H7 to ensure it is
+// always zero.  We have a compile-time option to enforce no-access to
+// that bottom 1kB, and if that is enabled we must not run this memory
+// check!
+#define MEMCHECK_ENABLED (defined(STM32H7) && !AP_BOARDCONFIG_MCU_MEMPROTECT_ENABLED)
+
+
 /* Scheduler implementation: */
 class ChibiOS::Scheduler : public AP_HAL::Scheduler {
 public:
@@ -111,7 +122,6 @@ public:
       be used to prevent watchdog reset during expected long delays
       A value of zero cancels the previous expected delay
      */
-    void     _expect_delay_ms(uint32_t ms);
     void     expect_delay_ms(uint32_t ms) override;
 
     /*
@@ -149,7 +159,6 @@ private:
     uint32_t expect_delay_start;
     uint32_t expect_delay_length;
     uint32_t expect_delay_nesting;
-    HAL_Semaphore expect_delay_sem;
 
     AP_HAL::MemberProc _timer_proc[CHIBIOS_SCHEDULER_MAX_TIMER_PROCS];
     uint8_t _num_timer_procs;
@@ -187,7 +196,7 @@ private:
     void _run_io(void);
     static void thread_create_trampoline(void *ctx);
 
-#if defined STM32H7
+#if MEMCHECK_ENABLED
     void check_low_memory_is_zero();
 #endif
 

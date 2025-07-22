@@ -21,9 +21,11 @@
  *
  */
 
-#include "AP_AHRS_Backend.h"
+#include "AP_AHRS_config.h"
 
-#if HAL_EXTERNAL_AHRS_ENABLED
+#if AP_AHRS_EXTERNAL_ENABLED
+
+#include "AP_AHRS_Backend.h"
 
 class AP_AHRS_External : public AP_AHRS_Backend {
 public:
@@ -42,9 +44,6 @@ public:
     void            update() override;
     void            get_results(Estimates &results) override;
     void            reset() override {}
-
-    // dead-reckoning support
-    virtual bool get_location(struct Location &loc) const override;
 
     // return a wind estimation vector, in m/s
     bool wind_estimate(Vector3f &ret) const override {
@@ -80,9 +79,9 @@ public:
 
     // relative-origin functions for fallback in AP_InertialNav
     bool get_origin(Location &ret) const override;
-    bool get_relative_position_NED_origin(Vector3f &vec) const override;
-    bool get_relative_position_NE_origin(Vector2f &posNE) const override;
-    bool get_relative_position_D_origin(float &posD) const override;
+    bool get_relative_position_NED_origin(Vector3p &vec) const override;
+    bool get_relative_position_NE_origin(Vector2p &posNE) const override;
+    bool get_relative_position_D_origin(postype_t &posD) const override;
 
     bool get_filter_status(nav_filter_status &status) const override;
     void send_ekf_status_report(class GCS_MAVLINK &link) const override;

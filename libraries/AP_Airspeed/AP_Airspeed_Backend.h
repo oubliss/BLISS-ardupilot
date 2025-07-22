@@ -31,8 +31,8 @@
 class AP_Airspeed_Backend {
 public:
     AP_Airspeed_Backend(AP_Airspeed &frontend, uint8_t instance);
-    virtual ~AP_Airspeed_Backend();
-    
+    virtual ~AP_Airspeed_Backend() {}
+
     // probe and initialise the sensor
     virtual bool init(void) = 0;
 
@@ -42,13 +42,16 @@ public:
     // return the current temperature in degrees C, if available
     virtual bool get_temperature(float &temperature) = 0;
 
-    // true if sensor reads airspeed directly, not via pressue
+    // true if sensor reads airspeed directly, not via pressure
     virtual bool has_airspeed() {return false;}
 
     // return airspeed in m/s if available
     virtual bool get_airspeed(float& airspeed) {return false;}
 
     virtual void handle_msp(const MSP::msp_airspeed_data_message_t &pkt) {}
+#if AP_AIRSPEED_EXTERNAL_ENABLED
+    virtual void handle_external(const AP_ExternalAHRS::airspeed_data_message_t &pkt) {}
+#endif
 
 #if AP_AIRSPEED_HYGROMETER_ENABLE
     // optional hygrometer support
@@ -59,7 +62,7 @@ protected:
     int8_t get_pin(void) const;
     float get_psi_range(void) const;
     uint8_t get_bus(void) const;
-    bool bus_is_confgured(void) const;
+    bool bus_is_configured(void) const;
     uint8_t get_instance(void) const {
         return instance;
     }
@@ -86,20 +89,9 @@ protected:
 
     // some sensors use zero offsets
     void set_use_zero_offset(void) {
-        frontend.state[instance].use_zero_offset = true;
-    }
-
-    // set to no zero cal, which makes sense for some sensors
-    void set_skip_cal(void) {
+        frontend.state[instance].cal.state = AP_Airspeed::CalibrationState::NOT_REQUIRED_ZERO_OFFSET;
 #ifndef HAL_BUILD_AP_PERIPH
-        frontend.param[instance].skip_cal.set(1);
-#endif
-    }
-
-    // set zero offset
-    void set_offset(float ofs) {
-#ifndef HAL_BUILD_AP_PERIPH
-        frontend.param[instance].offset.set(ofs);
+        frontend.param[instance].offset.set(0.0);
 #endif
     }
 
@@ -124,6 +116,7 @@ protected:
         ANALOG   = 0x08,
         NMEA     = 0x09,
         ASP5033  = 0x0A,
+        AUAV     = 0x0B,
     };
     
 private:

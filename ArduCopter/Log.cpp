@@ -1,6 +1,7 @@
 #include "Copter.h"
+#include <AP_InertialSensor/AP_InertialSensor_rate_config.h>
 
-#if LOGGING_ENABLED == ENABLED
+#if HAL_LOGGING_ENABLED
 
 // Code to Write and Read packets from AP_Logger log memory
 // Code to interact with the user to dump or erase logs
@@ -35,15 +36,19 @@ void Copter::Log_Write_Control_Tuning()
     float des_alt_m = 0.0f;
     int16_t target_climb_rate_cms = 0;
     if (!flightmode->has_manual_throttle()) {
-        des_alt_m = pos_control->get_pos_target_z_cm() * 0.01f;
-        target_climb_rate_cms = pos_control->get_vel_target_z_cms();
+        des_alt_m = pos_control->get_pos_target_U_cm() * 0.01f;
+        target_climb_rate_cms = pos_control->get_vel_target_U_cms();
     }
 
-    // get surface tracking alts
     float desired_rangefinder_alt;
+#if AP_RANGEFINDER_ENABLED
     if (!surface_tracking.get_target_dist_for_logging(desired_rangefinder_alt)) {
         desired_rangefinder_alt = AP::logger().quiet_nan();
     }
+#else
+    // get surface tracking alts
+    desired_rangefinder_alt = AP::logger().quiet_nan();
+#endif
 
     struct log_Control_Tuning pkt = {
         LOG_PACKET_HEADER_INIT(LOG_CONTROL_TUNING_MSG),
@@ -53,13 +58,17 @@ void Copter::Log_Write_Control_Tuning()
         throttle_out        : motors->get_throttle(),
         throttle_hover      : motors->get_throttle_hover(),
         desired_alt         : des_alt_m,
-        inav_alt            : inertial_nav.get_position_z_up_cm() * 0.01f,
+        inav_alt            : float(pos_control->get_pos_estimate_NEU_cm().z) * 0.01,
         baro_alt            : baro_alt,
         desired_rangefinder_alt : desired_rangefinder_alt,
+#if AP_RANGEFINDER_ENABLED
         rangefinder_alt     : surface_tracking.get_dist_for_logging(),
+#else
+        rangefinder_alt     : AP::logger().quiet_nanf(),
+#endif
         terr_alt            : terr_alt,
         target_climb_rate   : target_climb_rate_cms,
-        climb_rate          : int16_t(inertial_nav.get_velocity_z_up_cms()) // float -> int16_t
+        climb_rate          : int16_t(pos_control->get_vel_estimate_NEU_cms().z) // float -> int16_t
     };
     logger.WriteBlock(&pkt, sizeof(pkt));
 }
@@ -67,11 +76,13 @@ void Copter::Log_Write_Control_Tuning()
 // Write an attitude packet
 void Copter::Log_Write_Attitude()
 {
-    Vector3f targets = attitude_control->get_att_target_euler_cd();
-    targets.z = wrap_360_cd(targets.z);
-    ahrs.Write_Attitude(targets);
-    ahrs_view->Write_Rate(*motors, *attitude_control, *pos_control);
- }
+    attitude_control->Write_ANG();
+}
+
+void Copter::Log_Write_Rate()
+{
+    attitude_control->Write_Rate(*pos_control);
+}
 
 // Write PIDS packets
 void Copter::Log_Write_PIDS()
@@ -80,10 +91,10 @@ void Copter::Log_Write_PIDS()
         logger.Write_PID(LOG_PIDR_MSG, attitude_control->get_rate_roll_pid().get_pid_info());
         logger.Write_PID(LOG_PIDP_MSG, attitude_control->get_rate_pitch_pid().get_pid_info());
         logger.Write_PID(LOG_PIDY_MSG, attitude_control->get_rate_yaw_pid().get_pid_info());
-        logger.Write_PID(LOG_PIDA_MSG, pos_control->get_accel_z_pid().get_pid_info() );
+        logger.Write_PID(LOG_PIDA_MSG, pos_control->get_accel_U_pid().get_pid_info() );
         if (should_log(MASK_LOG_NTUN) && (flightmode->requires_GPS() || landing_with_GPS())) {
-            logger.Write_PID(LOG_PIDN_MSG, pos_control->get_vel_xy_pid().get_pid_info_x());
-            logger.Write_PID(LOG_PIDE_MSG, pos_control->get_vel_xy_pid().get_pid_info_y());
+            logger.Write_PID(LOG_PIDN_MSG, pos_control->get_vel_NE_pid().get_pid_info_x());
+            logger.Write_PID(LOG_PIDE_MSG, pos_control->get_vel_NE_pid().get_pid_info_y());
         }
     }
 }
@@ -202,24 +213,26 @@ void Copter::Log_Write_Data(LogDataID id, float value)
     }
 }
 
-struct PACKED log_ParameterTuning {
+struct PACKED log_PTUN {
     LOG_PACKET_HEADER;
     uint64_t time_us;
     uint8_t  parameter;     // parameter we are tuning, e.g. 39 is CH6_CIRCLE_RATE
     float    tuning_value;  // normalized value used inside tuning() function
     float    tuning_min;    // tuning minimum value
     float    tuning_max;    // tuning maximum value
+    float    norm_in;       // normalized control input (-1 to 1)
 };
 
-void Copter::Log_Write_Parameter_Tuning(uint8_t param, float tuning_val, float tune_min, float tune_max)
+void Copter::Log_Write_PTUN(uint8_t param, float tuning_val, float tune_min, float tune_max, float norm_in)
 {
-    struct log_ParameterTuning pkt_tune = {
+    const struct log_PTUN pkt_tune {
         LOG_PACKET_HEADER_INIT(LOG_PARAMTUNE_MSG),
         time_us        : AP_HAL::micros64(),
         parameter      : param,
         tuning_value   : tuning_val,
         tuning_min     : tune_min,
-        tuning_max     : tune_max
+        tuning_max     : tune_max,
+        norm_in        : norm_in
     };
 
     logger.WriteBlock(&pkt_tune, sizeof(pkt_tune));
@@ -250,7 +263,7 @@ struct PACKED log_SysIdD {
 // Write an rate packet
 void Copter::Log_Write_SysID_Data(float waveform_time, float waveform_sample, float waveform_freq, float angle_x, float angle_y, float angle_z, float accel_x, float accel_y, float accel_z)
 {
-#if MODE_SYSTEMID_ENABLED == ENABLED
+#if MODE_SYSTEMID_ENABLED
     struct log_SysIdD pkt_sidd = {
         LOG_PACKET_HEADER_INIT(LOG_SYSIDD_MSG),
         time_us         : AP_HAL::micros64(),
@@ -284,7 +297,7 @@ struct PACKED log_SysIdS {
 // Write an rate packet
 void Copter::Log_Write_SysID_Setup(uint8_t systemID_axis, float waveform_magnitude, float frequency_start, float frequency_stop, float time_fade_in, float time_const_freq, float time_record, float time_fade_out)
 {
-#if MODE_SYSTEMID_ENABLED == ENABLED
+#if MODE_SYSTEMID_ENABLED
     struct log_SysIdS pkt_sids = {
         LOG_PACKET_HEADER_INIT(LOG_SYSIDS_MSG),
         time_us             : AP_HAL::micros64(),
@@ -300,31 +313,6 @@ void Copter::Log_Write_SysID_Setup(uint8_t systemID_axis, float waveform_magnitu
     logger.WriteBlock(&pkt_sids, sizeof(pkt_sids));
 #endif
 }
-
-#if FRAME_CONFIG == HELI_FRAME
-struct PACKED log_Heli {
-    LOG_PACKET_HEADER;
-    uint64_t time_us;
-    float    desired_rotor_speed;
-    float    main_rotor_speed;
-    float    governor_output;
-    float    control_output;
-};
-
-// Write an helicopter packet
-void Copter::Log_Write_Heli()
-{
-    struct log_Heli pkt_heli = {
-        LOG_PACKET_HEADER_INIT(LOG_HELI_MSG),
-        time_us                 : AP_HAL::micros64(),
-        desired_rotor_speed     : motors->get_desired_rotor_speed(),
-        main_rotor_speed        : motors->get_main_rotor_speed(),
-        governor_output         : motors->get_governor_output(),
-        control_output          : motors->get_control_output(),
-    };
-    logger.WriteBlock(&pkt_heli, sizeof(pkt_heli));
-}
-#endif
 
 // guided position target logging
 struct PACKED log_Guided_Position_Target {
@@ -358,26 +346,36 @@ struct PACKED log_Guided_Attitude_Target {
     float climb_rate;
 };
 
+// rate thread dt stats
+struct PACKED log_Rate_Thread_Dt {
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    float dt;
+    float dtAvg;
+    float dtMax;
+    float dtMin;
+};
+
 // Write a Guided mode position target
-// pos_target is lat, lon, alt OR offset from ekf origin in cm
-// terrain should be 0 if pos_target.z is alt-above-ekf-origin, 1 if alt-above-terrain
-// vel_target is cm/s
-void Copter::Log_Write_Guided_Position_Target(ModeGuided::SubMode target_type, const Vector3f& pos_target, bool terrain_alt, const Vector3f& vel_target, const Vector3f& accel_target)
+// pos_target_cm is lat, lon, alt OR offset from ekf origin in cm
+// terrain should be 0 if pos_target_cm.z is alt-above-ekf-origin, 1 if alt-above-terrain
+// vel_target_cms is cm/s
+void Copter::Log_Write_Guided_Position_Target(ModeGuided::SubMode target_type, const Vector3f& pos_target_cm, bool terrain_alt, const Vector3f& vel_target_cms, const Vector3f& accel_target_cmss)
 {
     const log_Guided_Position_Target pkt {
         LOG_PACKET_HEADER_INIT(LOG_GUIDED_POSITION_TARGET_MSG),
         time_us         : AP_HAL::micros64(),
         type            : (uint8_t)target_type,
-        pos_target_x    : pos_target.x,
-        pos_target_y    : pos_target.y,
-        pos_target_z    : pos_target.z,
+        pos_target_x    : pos_target_cm.x * 0.01f,
+        pos_target_y    : pos_target_cm.y * 0.01f,
+        pos_target_z    : pos_target_cm.z * 0.01f,
         terrain         : terrain_alt,
-        vel_target_x    : vel_target.x,
-        vel_target_y    : vel_target.y,
-        vel_target_z    : vel_target.z,
-        accel_target_x  : accel_target.x,
-        accel_target_y  : accel_target.y,
-        accel_target_z  : accel_target.z
+        vel_target_x    : vel_target_cms.x * 0.01f,
+        vel_target_y    : vel_target_cms.y * 0.01f,
+        vel_target_z    : vel_target_cms.z * 0.01f,
+        accel_target_x  : accel_target_cmss.x * 0.01f,
+        accel_target_y  : accel_target_cmss.y * 0.01f,
+        accel_target_z  : accel_target_cmss.z * 0.01f
     };
     logger.WriteBlock(&pkt, sizeof(pkt));
 }
@@ -405,6 +403,21 @@ void Copter::Log_Write_Guided_Attitude_Target(ModeGuided::SubMode target_type, f
     logger.WriteBlock(&pkt, sizeof(pkt));
 }
 
+void Copter::Log_Write_Rate_Thread_Dt(float dt, float dtAvg, float dtMax, float dtMin)
+{
+#if AP_INERTIALSENSOR_FAST_SAMPLE_WINDOW_ENABLED
+    const log_Rate_Thread_Dt pkt {
+        LOG_PACKET_HEADER_INIT(LOG_RATE_THREAD_DT_MSG),
+        time_us         : AP_HAL::micros64(),
+        dt              : dt,
+        dtAvg           : dtAvg,
+        dtMax           : dtMax,
+        dtMin           : dtMin
+    };
+    logger.WriteBlock(&pkt, sizeof(pkt));
+#endif
+}
+
 // type and unit information can be found in
 // libraries/AP_Logger/Logstructure.h; search for "log_Units" for
 // units and "Format characters" for field type information
@@ -419,9 +432,10 @@ const struct LogStructure Copter::log_structure[] = {
 // @Field: TunVal: Normalized value used inside tuning() function
 // @Field: TunMin: Tuning minimum limit
 // @Field: TunMax: Tuning maximum limit
+// @Field: NIn: normalaised control input (normalised -1 to 1 value)
 
-    { LOG_PARAMTUNE_MSG, sizeof(log_ParameterTuning),
-      "PTUN", "QBfff",         "TimeUS,Param,TunVal,TunMin,TunMax", "s----", "F----" },
+    { LOG_PARAMTUNE_MSG, sizeof(log_PTUN),
+      "PTUN", "QBffff",         "TimeUS,Param,TunVal,TunMin,TunMax,NIn", "s#----", "F-----" },
 
 // @LoggerMessage: CTUN
 // @Description: Control Tuning information
@@ -481,18 +495,6 @@ const struct LogStructure Copter::log_structure[] = {
       "DU32",  "QBI",         "TimeUS,Id,Value", "s--", "F--" },
     { LOG_DATA_FLOAT_MSG, sizeof(log_Data_Float),         
       "DFLT",  "QBf",         "TimeUS,Id,Value", "s--", "F--" },
-    
-// @LoggerMessage: HELI
-// @Description: Helicopter related messages 
-// @Field: TimeUS: Time since system startup
-// @Field: DRRPM: Desired rotor speed
-// @Field: ERRPM: Estimated rotor speed
-// @Field: Gov: Governor Output
-// @Field: Throt: Throttle output
-#if FRAME_CONFIG == HELI_FRAME
-    { LOG_HELI_MSG, sizeof(log_Heli),
-      "HELI",  "Qffff",        "TimeUS,DRRPM,ERRPM,Gov,Throt", "s----", "F----" , true },
-#endif
 
 // @LoggerMessage: SIDD
 // @Description: System ID data
@@ -541,7 +543,7 @@ const struct LogStructure Copter::log_structure[] = {
 // @Field: aZ: Target acceleration, Z-Axis
 
     { LOG_GUIDED_POSITION_TARGET_MSG, sizeof(log_Guided_Position_Target),
-      "GUIP",  "QBfffbffffff",    "TimeUS,Type,pX,pY,pZ,Terrain,vX,vY,vZ,aX,aY,aZ", "s-mmm-nnnooo", "F-BBB-BBBBBB" , true },
+      "GUIP",  "QBfffbffffff",    "TimeUS,Type,pX,pY,pZ,Terrain,vX,vY,vZ,aX,aY,aZ", "s-mmm-nnnooo", "F-000-000000" , true },
 
 // @LoggerMessage: GUIA
 // @Description: Guided mode attitude target information
@@ -558,7 +560,24 @@ const struct LogStructure Copter::log_structure[] = {
 
     { LOG_GUIDED_ATTITUDE_TARGET_MSG, sizeof(log_Guided_Attitude_Target),
       "GUIA",  "QBffffffff",    "TimeUS,Type,Roll,Pitch,Yaw,RollRt,PitchRt,YawRt,Thrust,ClimbRt", "s-dddkkk-n", "F-000000-0" , true },
+
+// @LoggerMessage: RTDT
+// @Description: Attitude controller time deltas
+// @Field: TimeUS: Time since system startup
+// @Field: dt: current time delta
+// @Field: dtAvg: current time delta average
+// @Field: dtMax: Max time delta since last log output
+// @Field: dtMin: Min time delta since last log output
+
+    { LOG_RATE_THREAD_DT_MSG, sizeof(log_Rate_Thread_Dt),
+      "RTDT", "Qffff", "TimeUS,dt,dtAvg,dtMax,dtMin", "sssss", "F----" , true },
+
 };
+
+uint8_t Copter::get_num_log_structures() const
+{
+    return ARRAY_SIZE(log_structure);
+}
 
 void Copter::Log_Write_Vehicle_Startup_Messages()
 {
@@ -571,32 +590,4 @@ void Copter::Log_Write_Vehicle_Startup_Messages()
     gps.Write_AP_Logger_Log_Startup_messages();
 }
 
-void Copter::log_init(void)
-{
-    logger.Init(log_structure, ARRAY_SIZE(log_structure));
-}
-
-#else // LOGGING_ENABLED
-
-void Copter::Log_Write_Control_Tuning() {}
-void Copter::Log_Write_Attitude(void) {}
-void Copter::Log_Write_EKF_POS() {}
-void Copter::Log_Write_Data(LogDataID id, int32_t value) {}
-void Copter::Log_Write_Data(LogDataID id, uint32_t value) {}
-void Copter::Log_Write_Data(LogDataID id, int16_t value) {}
-void Copter::Log_Write_Data(LogDataID id, uint16_t value) {}
-void Copter::Log_Write_Data(LogDataID id, float value) {}
-void Copter::Log_Write_Parameter_Tuning(uint8_t param, float tuning_val, float tune_min, float tune_max) {}
-void Copter::Log_Write_Guided_Position_Target(ModeGuided::SubMode target_type, const Vector3f& pos_target, bool terrain_alt, const Vector3f& vel_target, const Vector3f& accel_target) {}
-void Copter::Log_Write_Guided_Attitude_Target(ModeGuided::SubMode target_type, float roll, float pitch, float yaw, const Vector3f &ang_vel, float thrust, float climb_rate) {}
-void Copter::Log_Write_SysID_Setup(uint8_t systemID_axis, float waveform_magnitude, float frequency_start, float frequency_stop, float time_fade_in, float time_const_freq, float time_record, float time_fade_out) {}
-void Copter::Log_Write_SysID_Data(float waveform_time, float waveform_sample, float waveform_freq, float angle_x, float angle_y, float angle_z, float accel_x, float accel_y, float accel_z) {}
-void Copter::Log_Write_Vehicle_Startup_Messages() {}
-
-#if FRAME_CONFIG == HELI_FRAME
-void Copter::Log_Write_Heli() {}
-#endif
-
-void Copter::log_init(void) {}
-
-#endif // LOGGING_ENABLED
+#endif // HAL_LOGGING_ENABLED

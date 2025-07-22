@@ -19,9 +19,6 @@
 #include <stdio.h>  // for sprintf
 #include <limits.h>
 #include <GCS_MAVLink/GCS.h>
-#include <AP_GPS/AP_GPS.h>
-#include <AP_Baro/AP_Baro.h>
-#include <AP_AHRS/AP_AHRS.h>
 
 #define ADSB_CHAN_TIMEOUT_MS            15000
 
@@ -63,7 +60,9 @@ void AP_ADSB_uAvionix_MAVLink::update()
 
 void AP_ADSB_uAvionix_MAVLink::send_dynamic_out(const mavlink_channel_t chan) const
 {
-    const AP_GPS &gps = AP::gps();
+    const auto &_my_loc = _frontend._my_loc;
+    const auto &gps = _my_loc;  // avoid churn
+
     const Vector3f &gps_velocity = gps.velocity();
 
     const int32_t latitude = _frontend._my_loc.lat;
@@ -72,7 +71,7 @@ void AP_ADSB_uAvionix_MAVLink::send_dynamic_out(const mavlink_channel_t chan) co
     const int16_t velVert = -1.0f * gps_velocity.z * 1E2; // convert m/s to cm/s
     const int16_t nsVog = gps_velocity.x * 1E2; // convert m/s to cm/s
     const int16_t ewVog = gps_velocity.y * 1E2; // convert m/s to cm/s
-    const uint8_t fixType = gps.status(); // this lines up perfectly with our enum
+    const AP_GPS_FixType fixType = gps.status(); // this lines up perfectly with our enum
     const uint8_t emStatus = 0; // TODO: implement this ENUM. no emergency = 0
     const uint8_t numSats = gps.num_sats();
     const uint16_t squawk = _frontend.out_state.cfg.squawk_octal;
@@ -107,11 +106,10 @@ void AP_ADSB_uAvionix_MAVLink::send_dynamic_out(const mavlink_channel_t chan) co
     const uint64_t gps_time = gps.time_epoch_usec();
     const uint32_t utcTime = gps_time / 1000000ULL;
 
-    const AP_Baro &baro = AP::baro();
     int32_t altPres = INT_MAX;
-    if (baro.healthy()) {
+    if (_my_loc.baro_is_healthy) {
         // Altitude difference between sea level pressure and current pressure. Result in millimeters
-        altPres = baro.get_altitude_difference(SSL_AIR_PRESSURE, baro.get_pressure()) * 1E3; // convert m to mm;
+        altPres = _my_loc.baro_alt_press_diff_sea_level * 1E3; // convert m to mm;
     }
 
 
@@ -122,7 +120,7 @@ void AP_ADSB_uAvionix_MAVLink::send_dynamic_out(const mavlink_channel_t chan) co
             latitude,
             longitude,
             altGNSS,
-            fixType,
+            uint8_t(fixType),
             numSats,
             altPres,
             accHoriz,
@@ -140,7 +138,7 @@ void AP_ADSB_uAvionix_MAVLink::send_dynamic_out(const mavlink_channel_t chan) co
 /*
  * To expand functionality in their HW, uAvionix has extended a few of the unused MAVLink bits to pack in more new features
  * This function will override the MSB byte of the 24bit ICAO address. To ensure an invalid >24bit ICAO is never broadcasted,
- * this function is used to create the encoded verison without ever writing to the actual ICAO number. It's created on-demand
+ * this function is used to create the encoded version without ever writing to the actual ICAO number. It's created on-demand
  */
 uint32_t AP_ADSB_uAvionix_MAVLink::encode_icao(const uint32_t icao_id) const
 {
@@ -179,22 +177,7 @@ uint8_t AP_ADSB_uAvionix_MAVLink::get_encoded_callsign_null_char()
 
     uint8_t encoded_null = 0;
 
-    if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 0) {
-        // not set or unknown. no bits set
-    } else if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 75) {
-        encoded_null |= 0x01;
-    } else if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 150) {
-        encoded_null |= 0x02;
-    } else if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 300) {
-        encoded_null |= 0x03;
-    } else if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 600) {
-        encoded_null |= 0x04;
-    } else if (_frontend.out_state.cfg.maxAircraftSpeed_knots <= 1200) {
-        encoded_null |= 0x05;
-    } else {
-        encoded_null |= 0x06;
-    }
-
+    encoded_null = AP_ADSB::convert_maxknots_to_enum(_frontend.out_state.cfg.maxAircraftSpeed_knots);
 
     if (_frontend.out_state.cfg.rf_capable & ADSB_BITBASK_RF_CAPABILITIES_1090ES_IN) {
         encoded_null |= 0x10;

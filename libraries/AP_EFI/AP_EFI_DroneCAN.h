@@ -1,9 +1,10 @@
 #pragma once
 
-#include "AP_EFI.h"
-#include "AP_EFI_Backend.h"
+#include "AP_EFI_config.h"
 
 #if AP_EFI_DRONECAN_ENABLED
+#include "AP_EFI.h"
+#include "AP_EFI_Backend.h"
 #include <AP_DroneCAN/AP_DroneCAN.h>
 
 class AP_EFI_DroneCAN : public AP_EFI_Backend {
@@ -12,7 +13,7 @@ public:
 
     void update() override;
 
-    static void subscribe_msgs(AP_DroneCAN* ap_dronecan);
+    static bool subscribe_msgs(AP_DroneCAN* ap_dronecan);
     static void trampoline_status(AP_DroneCAN *ap_dronecan, const CanardRxTransfer& transfer, const uavcan_equipment_ice_reciprocating_Status &msg);
 
 private:

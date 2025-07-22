@@ -2,14 +2,6 @@
 
 #include <AP_HAL/AP_HAL_Boards.h>
 
-// Just so that it's completely clear...
-#define ENABLED                 1
-#define DISABLED                0
-
-// this avoids a very common config error
-#define ENABLE ENABLED
-#define DISABLE DISABLED
-
 // Frame types
 #define UNDEFINED_FRAME 0
 #define MULTICOPTER_FRAME 1
@@ -59,7 +51,8 @@ enum tuning_func {
     TUNING_RATE_YAW_FILT =              56, // yaw rate input filter
     UNUSED =                            57, // was winch control
     TUNING_SYSTEM_ID_MAGNITUDE =        58, // magnitude of the system ID signal
-    TUNING_POS_CONTROL_ANGLE_MAX =      59  // position controller maximum angle
+    TUNING_POS_CONTROL_ANGLE_MAX =      59, // position controller maximum angle
+    TUNING_LOITER_MAX_XY_SPEED =        60, // maximum loiter horizontal speed
 };
 
 // Yaw behaviours during missions - possible values for WP_YAW_BEHAVIOR parameter
@@ -74,18 +67,6 @@ enum class AirMode {
     AIRMODE_NONE,
     AIRMODE_DISABLED,
     AIRMODE_ENABLED,
-};
-
-enum PayloadPlaceStateType {
-    PayloadPlaceStateType_FlyToLocation,
-    PayloadPlaceStateType_Descent_Start,
-    PayloadPlaceStateType_Descent,
-    PayloadPlaceStateType_Release,
-    PayloadPlaceStateType_Releasing,
-    PayloadPlaceStateType_Delay,
-    PayloadPlaceStateType_Ascent_Start,
-    PayloadPlaceStateType_Ascent,
-    PayloadPlaceStateType_Done,
 };
 
 // bit options for DEV_OPTIONS parameter
@@ -107,7 +88,8 @@ enum LoggingParameters {
      LOG_GUIDED_POSITION_TARGET_MSG,
      LOG_SYSIDD_MSG,
      LOG_SYSIDS_MSG,
-     LOG_GUIDED_ATTITUDE_TARGET_MSG
+     LOG_GUIDED_ATTITUDE_TARGET_MSG,
+     LOG_RATE_THREAD_DT_MSG
 };
 
 #define MASK_LOG_ATTITUDE_FAST          (1<<0)
@@ -154,6 +136,7 @@ enum LoggingParameters {
 #define FS_GCS_ENABLED_BRAKE_OR_LAND           7
 
 // EKF failsafe definitions (FS_EKF_ACTION parameter)
+#define FS_EKF_ACTION_REPORT_ONLY           0
 #define FS_EKF_ACTION_LAND                  1       // switch to LAND mode on EKF failsafe
 #define FS_EKF_ACTION_ALTHOLD               2       // switch to ALTHOLD mode on EKF failsafe
 #define FS_EKF_ACTION_LAND_EVEN_STABILIZE   3       // switch to Land mode on EKF failsafe even if in a manual flight mode like stabilize

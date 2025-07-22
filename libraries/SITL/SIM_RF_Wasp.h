@@ -15,7 +15,7 @@
 /*
   Simulator for the Wasp serial rangefinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:wasp --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:wasp --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set RNGFND1_TYPE 18
@@ -35,6 +35,8 @@ namespace SITL {
 
 class RF_Wasp : public SerialRangeFinder {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_Wasp(); }
 
     void update(float range) override;
 

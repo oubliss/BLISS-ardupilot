@@ -15,7 +15,7 @@
 /*
   Simulator for the GY-US42-v2 serial rangefinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:gyus42v2 --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:gyus42v2 --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set RNGFND1_TYPE 31
@@ -35,6 +35,8 @@ namespace SITL {
 
 class RF_GYUS42v2 : public SerialRangeFinder {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_GYUS42v2(); }
 
     uint32_t packet_for_alt(uint16_t alt_cm, uint8_t *buffer, uint8_t buflen) override;
 

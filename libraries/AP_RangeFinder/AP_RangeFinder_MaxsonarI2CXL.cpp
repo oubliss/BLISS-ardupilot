@@ -34,9 +34,9 @@ extern const AP_HAL::HAL& hal;
 
 AP_RangeFinder_MaxsonarI2CXL::AP_RangeFinder_MaxsonarI2CXL(RangeFinder::RangeFinder_State &_state,
                                                            AP_RangeFinder_Params &_params,
-                                                           AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev)
+                                                           AP_HAL::I2CDevice *dev)
     : AP_RangeFinder_Backend(_state, _params)
-    , _dev(std::move(dev))
+    , _dev(dev)
 {
 }
 
@@ -47,14 +47,14 @@ AP_RangeFinder_MaxsonarI2CXL::AP_RangeFinder_MaxsonarI2CXL(RangeFinder::RangeFin
 */
 AP_RangeFinder_Backend *AP_RangeFinder_MaxsonarI2CXL::detect(RangeFinder::RangeFinder_State &_state,
 																AP_RangeFinder_Params &_params,
-                                                             AP_HAL::OwnPtr<AP_HAL::I2CDevice> dev)
+                                                             AP_HAL::I2CDevice *dev)
 {
     if (!dev) {
         return nullptr;
     }
 
     AP_RangeFinder_MaxsonarI2CXL *sensor
-        = new AP_RangeFinder_MaxsonarI2CXL(_state, _params, std::move(dev));
+        = NEW_NOTHROW AP_RangeFinder_MaxsonarI2CXL(_state, _params, dev);
     if (!sensor) {
         return nullptr;
     }
@@ -116,10 +116,10 @@ bool AP_RangeFinder_MaxsonarI2CXL::get_reading(uint16_t &reading_cm)
     if (ret) {
         // combine results into distance
         reading_cm = be16toh(val);
-
-        // trigger a new reading
-        start_reading();
     }
+
+    // trigger a new reading
+    start_reading();
 
     return ret;
 }

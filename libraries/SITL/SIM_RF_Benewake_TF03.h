@@ -15,7 +15,7 @@
 /*
   Simulator for the Benewake TF03 RangeFinder
 
-./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --uartF=sim:benewake_tf03 --speedup=1
+./Tools/autotest/sim_vehicle.py --gdb --debug -v ArduCopter -A --serial5=sim:benewake_tf03 --speedup=1
 
 param set SERIAL5_PROTOCOL 9
 param set RNGFND1_TYPE 27
@@ -35,6 +35,8 @@ namespace SITL {
 
 class RF_Benewake_TF03 : public RF_Benewake {
 public:
+
+    static SerialRangeFinder *create() { return NEW_NOTHROW RF_Benewake_TF03(); }
 
     // see AP_RangeFinder_Benewake.cpp for definitions
     uint8_t byte4() const override { return 0; } // reserved

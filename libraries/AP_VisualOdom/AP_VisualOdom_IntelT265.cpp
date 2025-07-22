@@ -28,7 +28,8 @@
 extern const AP_HAL::HAL& hal;
 
 // consume vision pose estimate data and send to EKF. distances in meters
-void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter)
+// quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
+void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint32_t time_ms, float x, float y, float z, const Quaternion &attitude, float posErr, float angErr, uint8_t reset_counter, int8_t quality)
 {
     const float scale_factor = _frontend.get_pos_scale();
     Vector3f pos{x * scale_factor, y * scale_factor, z * scale_factor};
@@ -59,8 +60,11 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
     posErr = constrain_float(posErr, _frontend.get_pos_noise(), 100.0f);
     angErr = constrain_float(angErr, _frontend.get_yaw_noise(), 1.5f);
 
+    // record quality
+    _quality = quality;
+
     // check for recent position reset
-    bool consume = should_consume_sensor_data(true, reset_counter);
+    bool consume = should_consume_sensor_data(true, reset_counter) && (_quality >= _frontend.get_quality_min());
     if (consume) {
         // send attitude and position to EKF
         AP::ahrs().writeExtNavData(pos, att, posErr, angErr, time_ms, _frontend.get_delay_ms(), get_reset_timestamp_ms(reset_counter));
@@ -72,8 +76,10 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
     float yaw;
     att.to_euler(roll, pitch, yaw);
 
+#if HAL_LOGGING_ENABLED
     // log sensor data
-    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), wrap_360(degrees(yaw)), posErr, angErr, reset_counter, !consume);
+    Write_VisualPosition(remote_time_us, time_ms, pos.x, pos.y, pos.z, degrees(roll), degrees(pitch), wrap_360(degrees(yaw)), posErr, angErr, reset_counter, !consume, _quality);
+#endif
 
     // store corrected attitude for use in pre-arm checks
     _attitude_last = att;
@@ -83,14 +89,18 @@ void AP_VisualOdom_IntelT265::handle_pose_estimate(uint64_t remote_time_us, uint
 }
 
 // consume vision velocity estimate data and send to EKF, velocity in NED meters per second
-void AP_VisualOdom_IntelT265::handle_vision_speed_estimate(uint64_t remote_time_us, uint32_t time_ms, const Vector3f &vel, uint8_t reset_counter)
+// quality of -1 means failed, 0 means unknown, 1 is worst, 100 is best
+void AP_VisualOdom_IntelT265::handle_vision_speed_estimate(uint64_t remote_time_us, uint32_t time_ms, const Vector3f &vel, uint8_t reset_counter, int8_t quality)
 {
     // rotate velocity to align with vehicle
     Vector3f vel_corrected = vel;
     rotate_velocity(vel_corrected);
 
+    // record quality
+    _quality = quality;
+
     // check for recent position reset
-    bool consume = should_consume_sensor_data(false, reset_counter);
+    bool consume = should_consume_sensor_data(false, reset_counter) && (_quality >= _frontend.get_quality_min());
     if (consume) {
         // send velocity to EKF
         AP::ahrs().writeExtNavVelData(vel_corrected, _frontend.get_vel_noise(), time_ms, _frontend.get_delay_ms());
@@ -99,16 +109,9 @@ void AP_VisualOdom_IntelT265::handle_vision_speed_estimate(uint64_t remote_time_
     // record time for health monitoring
     _last_update_ms = AP_HAL::millis();
 
-    Write_VisualVelocity(remote_time_us, time_ms, vel_corrected, reset_counter, !consume);
-}
-
-// apply rotation and correction to position
-void AP_VisualOdom_IntelT265::rotate_and_correct_position(Vector3f &position) const
-{
-    if (_use_posvel_rotation) {
-        position = _posvel_rotation * position;
-    }
-    position += _pos_correction;
+#if HAL_LOGGING_ENABLED
+    Write_VisualVelocity(remote_time_us, time_ms, vel_corrected, reset_counter, !consume, _quality);
+#endif
 }
 
 // apply rotation to velocity
@@ -143,11 +146,15 @@ bool AP_VisualOdom_IntelT265::align_yaw_to_ahrs(const Vector3f &position, const 
     }
 
     // do not align until ahrs yaw initialised
-    if (!AP::ahrs().initialised() || !AP::ahrs().dcm_yaw_initialised()) {
+    if (!AP::ahrs().initialised()
+#if AP_AHRS_DCM_ENABLED
+        || !AP::ahrs().dcm_yaw_initialised()
+#endif
+        ) {
         return false;
     }
 
-    align_yaw(position, attitude, AP::ahrs().get_yaw());
+    align_yaw(position, attitude, AP::ahrs().get_yaw_rad());
     return true;
 }
 
@@ -176,7 +183,7 @@ void AP_VisualOdom_IntelT265::align_yaw(const Vector3f &position, const Quaterni
     // trim yaw by difference between ahrs and sensor yaw
     const float yaw_trim_orig = _yaw_trim;
     _yaw_trim = wrap_2PI(yaw_rad - sens_yaw);
-    gcs().send_text(MAV_SEVERITY_INFO, "VisOdom: yaw shifted %d to %d deg",
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "VisOdom: yaw shifted %d to %d deg",
                     (int)degrees(_yaw_trim - yaw_trim_orig),
                     (int)wrap_360(degrees(sens_yaw + _yaw_trim)));
 
@@ -200,39 +207,6 @@ void AP_VisualOdom_IntelT265::align_yaw(const Vector3f &position, const Quaterni
 
     // update position correction to remove change due to rotation
     _pos_correction += (pos_orig - pos_new);
-}
-
-// align position with ahrs position by updating _pos_correction
-// sensor_pos should be the position directly from the sensor with only scaling applied (i.e. no yaw or position corrections)
-bool AP_VisualOdom_IntelT265::align_position_to_ahrs(const Vector3f &sensor_pos, bool align_xy, bool align_z)
-{
-    // fail immediately if ahrs cannot provide position
-    Vector3f ahrs_pos_ned;
-    if (!AP::ahrs().get_relative_position_NED_origin(ahrs_pos_ned)) {
-        return false;
-    }
-
-    align_position(sensor_pos, ahrs_pos_ned, align_xy, align_z);
-    return true;
-}
-
-// align position with a new position by updating _pos_correction
-// sensor_pos should be the position directly from the sensor with only scaling applied (i.e. no yaw or position corrections)
-// new_pos should be a NED position offset from the EKF origin
-void AP_VisualOdom_IntelT265::align_position(const Vector3f &sensor_pos, const Vector3f &new_pos, bool align_xy, bool align_z)
-{
-    // calculate position with current rotation and correction
-    Vector3f pos_orig = sensor_pos;
-    rotate_and_correct_position(pos_orig);
-
-    // update position correction
-    if (align_xy) {
-        _pos_correction.x += (new_pos.x - pos_orig.x);
-        _pos_correction.y += (new_pos.y - pos_orig.y);
-    }
-    if (align_z) {
-        _pos_correction.z += (new_pos.z - pos_orig.z);
-    }
 }
 
 // returns false if we fail arming checks, in which case the buffer will be populated with a failure message
@@ -333,7 +307,7 @@ void AP_VisualOdom_IntelT265::handle_voxl_camera_reset_jump(const Vector3f &sens
     }
 
     // warng user of reset
-    gcs().send_text(MAV_SEVERITY_WARNING, "VisOdom: reset");
+    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "VisOdom: reset");
 
     // align sensor yaw to match current yaw estimate
     align_yaw_to_ahrs(sensor_pos, sensor_att);

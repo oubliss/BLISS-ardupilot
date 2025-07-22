@@ -26,7 +26,7 @@ void Sub::set_home_to_current_location_inflight()
     Location temp_loc;
     Location ekf_origin;
     if (ahrs.get_location(temp_loc) && ahrs.get_origin(ekf_origin)) {
-        temp_loc.alt = ekf_origin.alt;
+        temp_loc.copy_alt_from(ekf_origin);
         if (!set_home(temp_loc, false)) {
             // ignore this failure
         }
@@ -44,7 +44,7 @@ bool Sub::set_home_to_current_location(bool lock)
         // This allows disarming and arming again at depth.
         // This also ensures that mission items with relative altitude frame, are always
         // relative to the water's surface, whether in a high elevation lake, or at sea level.
-        temp_loc.alt -= barometer.get_altitude() * 100.0f;
+        temp_loc.offset_up_m(-barometer.get_altitude());
         return set_home(temp_loc, lock);
     }
     return false;
@@ -72,13 +72,4 @@ bool Sub::set_home(const Location& loc, bool lock)
 
     // return success
     return true;
-}
-
-// far_from_EKF_origin - checks if a location is too far from the EKF origin
-//  returns true if too far
-bool Sub::far_from_EKF_origin(const Location& loc)
-{
-    // check distance to EKF origin
-    Location ekf_origin;
-    return ahrs.get_origin(ekf_origin) && (ekf_origin.get_distance(loc) > EKF_ORIGIN_MAX_DIST_M);
 }

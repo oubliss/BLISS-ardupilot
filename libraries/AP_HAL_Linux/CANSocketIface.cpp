@@ -34,6 +34,7 @@
 
 #include <sys/socket.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <net/if.h>
 #include <linux/can/raw.h>
 #include <cstring>
@@ -50,8 +51,6 @@ using namespace Linux;
 #else
 #define Debug(fmt, args...)
 #endif
-
-CANIface::CANSocketEventSource CANIface::evt_can_socket[HAL_NUM_CAN_IFACES];
 
 static can_frame makeSocketCanFrame(const AP_HAL::CANFrame& uavcan_frame)
 {
@@ -193,6 +192,9 @@ int16_t CANIface::receive(AP_HAL::CANFrame& out_frame, uint64_t& out_timestamp_u
         out_flags        = rx.flags;
     }
     (void)_rx_queue.pop();
+    if (sem_handle != nullptr) {
+        sem_handle->signal();
+    }
     return AP_HAL::CANIface::receive(out_frame, out_timestamp_us, out_flags);
 }
 
@@ -268,6 +270,9 @@ void CANIface::_pollWrite()
 {
     while (_hasReadyTx()) {
         WITH_SEMAPHORE(sem);
+        if (!_hasReadyTx()) {
+            break;
+        }
         const CanTxItem tx = _tx_queue.top();
         uint64_t curr_time = AP_HAL::micros64();
         if (tx.deadline >= curr_time) {
@@ -279,11 +284,12 @@ void CANIface::_pollWrite()
                     _pending_loopback_ids.insert(tx.frame.id);
                 }
                 stats.tx_success++;
+                stats.last_transmit_us = curr_time;
             } else if (res == 0) {            // Not transmitted, nor is it an error
-                stats.tx_full++;
+                stats.tx_overflow++;
                 break;                        // Leaving the loop, the frame remains enqueued for the next retry
             } else {                          // Transmission error
-                stats.tx_write_fail++;
+                stats.tx_rejected++;
             }
         } else {
             // hal.console->printf("TDEAD: %lu CURRT: %lu DEL: %lu\n", tx.deadline, curr_time, curr_time-tx.deadline);
@@ -506,8 +512,9 @@ bool CANIface::select(bool &read_select, bool &write_select,
                 stats.num_tx_poll_req++;
             }
         }
-        if (_evt_handle != nullptr && blocking_deadline > AP_HAL::micros64()) {
-            _evt_handle->wait(blocking_deadline - AP_HAL::micros64());
+        const uint64_t now_us = AP_HAL::micros64();
+        if (sem_handle != nullptr && blocking_deadline > now_us) {
+            IGNORE_RETURN(sem_handle->wait(blocking_deadline - now_us));
         }
     }
 
@@ -527,72 +534,18 @@ bool CANIface::select(bool &read_select, bool &write_select,
     return true;
 }
 
-bool CANIface::set_event_handle(AP_HAL::EventHandle* handle) {
-    _evt_handle = handle;
-    evt_can_socket[_self_index]._ifaces[_self_index] = this;
-    _evt_handle->set_source(&evt_can_socket[_self_index]);
-    return true;
-}
-
-
-bool CANIface::CANSocketEventSource::wait(uint16_t duration_us, AP_HAL::EventHandle* evt_handle)
+bool CANIface::set_event_handle(AP_HAL::BinarySemaphore *handle)
 {
-    if (evt_handle == nullptr) {
-        return false;
-    }
-    pollfd pollfds[HAL_NUM_CAN_IFACES] {};
-    uint8_t pollfd_iface_map[HAL_NUM_CAN_IFACES] {};
-    unsigned long int num_pollfds = 0;
-    
-    // Poll FD set setup
-    for (unsigned i = 0; i < HAL_NUM_CAN_IFACES; i++) {
-        if (_ifaces[i] == nullptr) {
-            continue;
-        }
-        if (_ifaces[i]->_down) {
-            continue;
-        }
-        pollfds[num_pollfds] = _ifaces[i]->_pollfd;
-        pollfd_iface_map[num_pollfds] = i;
-        num_pollfds++;
-        _ifaces[i]->stats.num_poll_waits++;
-    }
-
-    if (num_pollfds == 0) {
-        return true;
-    }
-
-    // Timeout conversion
-    auto ts = timespec();
-    ts.tv_sec = 0;
-    ts.tv_nsec = duration_us * 1000UL;
-
-    // Blocking here
-    const int res = ppoll(pollfds, num_pollfds, &ts, nullptr);
-
-    if (res < 0) {
-        return false;
-    }
-
-    // Handling poll output
-    for (unsigned i = 0; i < num_pollfds; i++) {
-        if (_ifaces[pollfd_iface_map[i]] == nullptr) {
-            continue;
-        }
-        _ifaces[pollfd_iface_map[i]]->_updateDownStatusFromPollResult(pollfds[i]);
-
-        const bool poll_read  = pollfds[i].revents & POLLIN;
-        const bool poll_write = pollfds[i].revents & POLLOUT;
-        _ifaces[pollfd_iface_map[i]]->_poll(poll_read, poll_write);
-    }
+    sem_handle = handle;
     return true;
 }
+
 
 void CANIface::get_stats(ExpandingString &str)
 {
     str.printf("tx_requests:    %u\n"
-               "tx_write_fail:  %u\n"
-               "tx_full:        %u\n"
+               "tx_rejected:    %u\n"
+               "tx_overflow:    %u\n"
                "tx_confirmed:   %u\n"
                "tx_success:     %u\n"
                "tx_timedout:    %u\n"
@@ -605,8 +558,8 @@ void CANIface::get_stats(ExpandingString &str)
                "num_poll_tx_events: %u\n"
                "num_poll_rx_events: %u\n",
                stats.tx_requests,
-               stats.tx_write_fail,
-               stats.tx_full,
+               stats.tx_rejected,
+               stats.tx_overflow,
                stats.tx_confirmed,
                stats.tx_success,
                stats.tx_timedout,

@@ -1,10 +1,12 @@
 #include "AP_Camera_Backend.h"
 #include <AP_Mount/AP_Mount.h>
+#include <AP_Logger/AP_Logger_config.h>
 
-#if AP_CAMERA_ENABLED
+#if AP_CAMERA_ENABLED && HAL_LOGGING_ENABLED
 
 #include <AP_Logger/AP_Logger.h>
 #include <AP_GPS/AP_GPS.h>
+#include <AP_AHRS/AP_AHRS.h>
 
 // Write a Camera packet.  Also writes a Mount packet if available
 void AP_Camera_Backend::Write_CameraInfo(enum LogMessages msg, uint64_t timestamp_us)
@@ -27,19 +29,20 @@ void AP_Camera_Backend::Write_CameraInfo(enum LogMessages msg, uint64_t timestam
         // completely ignore this failure!  AHRS will provide its best guess.
     }
 
-    int32_t altitude, altitude_rel, altitude_gps;
-    if (current_loc.relative_alt) {
-        altitude = current_loc.alt+ahrs.get_home().alt;
-        altitude_rel = current_loc.alt;
-    } else {
-        altitude = current_loc.alt;
-        altitude_rel = current_loc.alt - ahrs.get_home().alt;
+    int32_t altitude_cm = 0;
+    int32_t altitude_rel_cm = 0;
+    if (current_loc.initialised()) {
+        // ignore failures to get altitude
+        IGNORE_RETURN(current_loc.get_alt_cm(Location::AltFrame::ABSOLUTE, altitude_cm));
+        IGNORE_RETURN(current_loc.get_alt_cm(Location::AltFrame::ABOVE_HOME, altitude_rel_cm));
     }
+
+    int32_t altitude_gps_cm = 0;
     const AP_GPS &gps = AP::gps();
     if (gps.status() >= AP_GPS::GPS_OK_FIX_3D) {
-        altitude_gps = gps.location().alt;
-    } else {
-        altitude_gps = 0;
+        if (!gps.location().get_alt_cm(Location::AltFrame::ABSOLUTE, altitude_gps_cm)) {
+            // ignore this problem...
+        }
     }
 
     // if timestamp is zero set to current system time
@@ -56,9 +59,9 @@ void AP_Camera_Backend::Write_CameraInfo(enum LogMessages msg, uint64_t timestam
         gps_week    : gps.time_week(),
         latitude    : current_loc.lat,
         longitude   : current_loc.lng,
-        altitude    : altitude,
-        altitude_rel: altitude_rel,
-        altitude_gps: altitude_gps,
+        altitude    : altitude_cm,
+        altitude_rel: altitude_rel_cm,
+        altitude_gps: altitude_gps_cm,
         roll        : (int16_t)ahrs.roll_sensor,
         pitch       : (int16_t)ahrs.pitch_sensor,
         yaw         : (uint16_t)ahrs.yaw_sensor
@@ -85,4 +88,4 @@ void AP_Camera_Backend::Write_Trigger()
     Write_CameraInfo(LOG_TRIGGER_MSG, 0);
 }
 
-#endif
+#endif  // AP_CAMERA_ENABLED && HAL_LOGGING_ENABLED

@@ -1,6 +1,7 @@
+#include "GCS_config.h"
 #include <AC_Fence/AC_Fence_config.h>
 
-#if AP_FENCE_ENABLED
+#if HAL_GCS_ENABLED && AP_FENCE_ENABLED
 
 #include "GCS.h"
 
@@ -8,27 +9,31 @@
 #include <AC_Avoidance/AC_Avoid.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
-MAV_RESULT GCS_MAVLINK::handle_command_do_fence_enable(const mavlink_command_long_t &packet)
+MAV_RESULT GCS_MAVLINK::handle_command_do_fence_enable(const mavlink_command_int_t &packet)
 {
     AC_Fence *fence = AP::fence();
     if (fence == nullptr) {
         return MAV_RESULT_UNSUPPORTED;
     }
 
-    switch ((uint16_t)packet.param1) {
-    case 0: // disable fence
-        fence->enable(false);
+    uint8_t fences = AC_FENCE_ALL_FENCES;
+    if (uint8_t(packet.param2)) {
+        fences = uint8_t(packet.param2);
+    }
+
+    switch (AC_Fence::MavlinkFenceActions(packet.param1)) {
+    case AC_Fence::MavlinkFenceActions::DISABLE_FENCE:
+        fence->enable(false, fences);
         return MAV_RESULT_ACCEPTED;
-    case 1: // enable fence
-        if (!fence->present())
-        {
+    case AC_Fence::MavlinkFenceActions::ENABLE_FENCE:
+        if (!(fence->present() & fences)) {
             return MAV_RESULT_FAILED;
         }
-    
-        fence->enable(true);
+
+        fence->enable(true, fences);
         return MAV_RESULT_ACCEPTED;
-    case 2: // disable fence floor only
-        fence->disable_floor();
+    case AC_Fence::MavlinkFenceActions::DISABLE_ALT_MIN_FENCE:
+        fence->enable(false, AC_FENCE_TYPE_ALT_MIN);
         return MAV_RESULT_ACCEPTED;
     default:
         return MAV_RESULT_FAILED;
@@ -81,9 +86,9 @@ void GCS_MAVLINK::send_fence_status() const
         mavlink_breach_type = FENCE_BREACH_BOUNDARY;
     }
 
-    // report on Avoidance liminting
+    // report on Avoidance limiting
     uint8_t breach_mitigation = FENCE_MITIGATE_UNKNOWN;
-#if !APM_BUILD_TYPE(APM_BUILD_ArduPlane)
+#if AP_AVOIDANCE_ENABLED && !APM_BUILD_TYPE(APM_BUILD_ArduPlane)
     const AC_Avoid* avoid =  AC_Avoid::get_singleton();
     if (avoid != nullptr) {
         if (avoid->limits_active()) {
@@ -103,4 +108,4 @@ void GCS_MAVLINK::send_fence_status() const
                                   breach_mitigation);
 }
 
-#endif
+#endif  // HAL_GCS_ENABLED && AP_FENCE_ENABLED

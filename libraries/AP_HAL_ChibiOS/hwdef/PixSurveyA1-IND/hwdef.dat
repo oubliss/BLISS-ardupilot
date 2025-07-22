@@ -1,8 +1,8 @@
 # MCU class and specific type
 MCU STM32F4xx STM32F427xx
 
-# board ID for firmware load
-APJ_BOARD_ID 1107
+# board ID. See Tools/AP_Bootloader/board_types.txt
+APJ_BOARD_ID AP_HW_PixSurveyA-IND
 
 # crystal frequency
 OSCILLATOR_HZ 24000000
@@ -13,7 +13,6 @@ STM32_ST_USE_TIMER 5
 # flash size
 FLASH_SIZE_KB 2048
 
-env OPTIMIZE -O2
 
 
 # serial port for stdout, disabled so console is on USB
@@ -23,18 +22,17 @@ env OPTIMIZE -O2
 # order of I2C buses
 I2C_ORDER I2C3 I2C2 I2C1
 
-# now the UART order. These map to the hal.uartA to hal.uartF
-# objects. If you use a shorter list then HAL_Empty::UARTDriver
-# objects are substituted for later UARTs, or you can leave a gap by
-# listing one or more of the uarts as EMPTY
+# now the SERIALn order. These map to the hal.serial(n) objects. If you use a
+# shorter list then HAL_Empty::UARTDriver objects are substituted for later
+# UARTs, or you can leave a gap by listing one or more of the uarts as EMPTY
 # 1) SERIAL0: console (primary mavlink, usually USB)
-# 2) SERIAL3: primary GPS
-# 3) SERIAL1: telem1
-# 4) SERIAL2: telem2
+# 2) SERIAL1: telem1
+# 3) SERIAL2: telem2
+# 4) SERIAL3: primary GPS
 # 5) SERIAL4: GPS2
 # 6) SERIAL5: extra UART (usually RTOS debug console)
 
-# order of UARTs (and USB)
+# order of SERIALn (incl. USB)
 SERIAL_ORDER OTG1 USART2 USART3 UART4 UART8  UART7
 
 # UART for IOMCU
@@ -172,8 +170,8 @@ IMU Invensensev3 SPI:ICM42688_ext     ROTATION_NONE
 IMU Invensensev3 SPI:ICM40605_ext     ROTATION_NONE
 
 
-BARO MS56XX SPI:ms5611
-BARO MS56XX SPI:ms5611_ext
+BARO MS5611 SPI:ms5611
+BARO MS5611 SPI:ms5611_ext
 
 
 COMPASS IST8310 I2C:0:0x0E false ROTATION_ROLL_180_YAW_270

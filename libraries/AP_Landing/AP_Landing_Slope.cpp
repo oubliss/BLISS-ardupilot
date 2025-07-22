@@ -38,7 +38,7 @@ void AP_Landing::type_slope_do_land(const AP_Mission::Mission_Command& cmd, cons
     type_slope_flags.post_stats = false;
 
     type_slope_stage = SlopeStage::NORMAL;
-    gcs().send_text(MAV_SEVERITY_INFO, "Landing approach start at %.1fm", (double)relative_altitude);
+    GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Landing approach start at %.1fm", (double)relative_altitude);
 }
 
 void AP_Landing::type_slope_verify_abort_landing(const Location &prev_WP_loc, Location &next_WP_loc, bool &throttle_suppressed)
@@ -64,7 +64,7 @@ bool AP_Landing::type_slope_verify_land(const Location &prev_WP_loc, Location &n
     if (type_slope_stage == SlopeStage::NORMAL) {
         const bool heading_lined_up = abs(nav_controller->bearing_error_cd()) < 1000 && !nav_controller->data_is_stale();
         const bool on_flight_line = fabsf(nav_controller->crosstrack_error()) < 5.0f && !nav_controller->data_is_stale();
-        const bool below_prev_WP = current_loc.alt < prev_WP_loc.alt;
+        const bool below_prev_WP = current_loc.alt < loc_alt_AMSL_cm(prev_WP_loc);
         if ((mission.get_prev_nav_cmd_id() == MAV_CMD_NAV_LOITER_TO_ALT) ||
             (wp_proportion >= 0 && heading_lined_up && on_flight_line) ||
             (wp_proportion > 0.15f && heading_lined_up && below_prev_WP) ||
@@ -106,9 +106,9 @@ bool AP_Landing::type_slope_verify_land(const Location &prev_WP_loc, Location &n
         if (type_slope_stage != SlopeStage::FINAL) {
             type_slope_flags.post_stats = true;
             if (is_flying && (AP_HAL::millis()-last_flying_ms) > 3000) {
-                gcs().send_text(MAV_SEVERITY_CRITICAL, "Flare crash detected: speed=%.1f", (double)gps.ground_speed());
+                GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Flare crash detected: speed=%.1f", (double)gps.ground_speed());
             } else {
-                gcs().send_text(MAV_SEVERITY_INFO, "Flare %.1fm sink=%.2f speed=%.1f dist=%.1f",
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Flare %.1fm sink=%.2f speed=%.1f dist=%.1f",
                                   (double)height, (double)sink_rate,
                                   (double)gps.ground_speed(),
                                   (double)current_loc.get_distance(next_WP_loc));
@@ -122,7 +122,7 @@ bool AP_Landing::type_slope_verify_land(const Location &prev_WP_loc, Location &n
             AP_LandingGear *LG_inst = AP_LandingGear::get_singleton();
             if (LG_inst != nullptr && !LG_inst->check_before_land()) {
                 type_slope_request_go_around();
-                gcs().send_text(MAV_SEVERITY_CRITICAL, "Landing gear was not deployed");
+                GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Landing gear was not deployed");
             }
 #endif
         }
@@ -132,8 +132,8 @@ bool AP_Landing::type_slope_verify_land(const Location &prev_WP_loc, Location &n
             // been set for landing. We don't do this till ground
             // speed drops below 3.0 m/s as otherwise we will change
             // target speeds too early.
-            aparm.airspeed_cruise_cm.load();
-            aparm.min_gndspeed_cm.load();
+            aparm.airspeed_cruise.load();
+            aparm.min_groundspeed.load();
             aparm.throttle_cruise.load();
         }
     } else if (type_slope_stage == SlopeStage::APPROACH && pre_flare_airspeed > 0) {
@@ -158,7 +158,7 @@ bool AP_Landing::type_slope_verify_land(const Location &prev_WP_loc, Location &n
     // this is done before disarm_if_autoland_complete() so that it happens on the next loop after the disarm
     if (type_slope_flags.post_stats && !is_armed) {
         type_slope_flags.post_stats = false;
-        gcs().send_text(MAV_SEVERITY_INFO, "Distance from LAND point=%.2fm", (double)current_loc.get_distance(next_WP_loc));
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Distance from LAND point=%.2fm", (double)current_loc.get_distance(next_WP_loc));
     }
 
     // check if we should auto-disarm after a confirmed landing
@@ -201,10 +201,10 @@ void AP_Landing::type_slope_adjust_landing_slope_for_rangefinder_bump(AP_FixedWi
 
     rangefinder_state.last_stable_correction = rangefinder_state.correction;
 
-    float corrected_alt_m = (adjusted_altitude_cm_fn() - next_WP_loc.alt)*0.01f - rangefinder_state.correction;
+    float corrected_alt_m = (adjusted_altitude_cm_fn() - loc_alt_AMSL_cm(next_WP_loc))*0.01f - rangefinder_state.correction;
     float total_distance_m = prev_WP_loc.get_distance(next_WP_loc);
     float top_of_glide_slope_alt_m = total_distance_m * corrected_alt_m / wp_distance;
-    prev_WP_loc.alt = top_of_glide_slope_alt_m*100 + next_WP_loc.alt;
+    prev_WP_loc.set_alt_cm(top_of_glide_slope_alt_m*100 + loc_alt_AMSL_cm(next_WP_loc), Location::AltFrame::ABSOLUTE);
 
     // re-calculate auto_state.land_slope with updated prev_WP_loc
     setup_landing_glide_slope(prev_WP_loc, next_WP_loc, current_loc, target_altitude_offset_cm);
@@ -226,7 +226,7 @@ void AP_Landing::type_slope_adjust_landing_slope_for_rangefinder_bump(AP_FixedWi
 
         // is projected slope too steep?
         if (new_slope_deg - initial_slope_deg > slope_recalc_steep_threshold_to_abort) {
-            gcs().send_text(MAV_SEVERITY_INFO, "Landing slope too steep, aborting (%.0fm %.1fdeg)",
+            GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Landing slope too steep, aborting (%.0fm %.1fdeg)",
                                              (double)rangefinder_state.correction, (double)(new_slope_deg - initial_slope_deg));
             alt_offset = rangefinder_state.correction;
             flags.commanded_go_around = true;
@@ -261,7 +261,7 @@ void AP_Landing::type_slope_setup_landing_glide_slope(const Location &prev_WP_lo
     }
 
     // height we need to sink for this WP
-    float sink_height = (prev_WP_loc.alt - next_WP_loc.alt)*0.01f;
+    float sink_height = (loc_alt_AMSL_cm(prev_WP_loc) - loc_alt_AMSL_cm(next_WP_loc))*0.01f;
 
     // current ground speed
     float groundspeed = ahrs.groundspeed();
@@ -312,6 +312,7 @@ void AP_Landing::type_slope_setup_landing_glide_slope(const Location &prev_WP_lo
     // now calculate our aim point, which is before the landing
     // point and above it
     Location loc = next_WP_loc;
+    loc.change_alt_frame(Location::AltFrame::ABSOLUTE);
     loc.offset_bearing(land_bearing_cd * 0.01f, -flare_distance);
     loc.alt += aim_height*100;
 
@@ -319,15 +320,15 @@ void AP_Landing::type_slope_setup_landing_glide_slope(const Location &prev_WP_lo
     bool is_first_calc = is_zero(slope);
     slope = (sink_height - aim_height) / (total_distance - flare_distance);
     if (is_first_calc) {
-        gcs().send_text(MAV_SEVERITY_INFO, "Landing glide slope %.1f degrees", (double)degrees(atanf(slope)));
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Landing glide slope %.1f degrees", (double)degrees(atanf(slope)));
     }
 
     // calculate point along that slope 500m ahead
     loc.offset_bearing(land_bearing_cd * 0.01f, land_projection);
-    loc.alt -= slope * land_projection * 100;
+    loc.offset_up_m(-slope * land_projection);
 
     // setup the offset_cm for set_target_altitude_proportion()
-    target_altitude_offset_cm = loc.alt - prev_WP_loc.alt;
+    target_altitude_offset_cm = loc.alt - loc_alt_AMSL_cm(prev_WP_loc);
 
     // calculate the proportion we are to the target
     float land_proportion = current_loc.line_path_proportion(prev_WP_loc, loc);
@@ -345,15 +346,15 @@ int32_t AP_Landing::type_slope_get_target_airspeed_cm(void)
     // pre-flare airspeeds. Also increase for head-winds
 
     const float land_airspeed = tecs_Controller->get_land_airspeed();
-    int32_t target_airspeed_cm = aparm.airspeed_cruise_cm;
+    int32_t target_airspeed_cm = aparm.airspeed_cruise*100;
     if (land_airspeed >= 0) {
         target_airspeed_cm = land_airspeed * 100;
     } else {
-        target_airspeed_cm = 0.5 * (aparm.airspeed_cruise_cm * 0.01 + aparm.airspeed_min);
+        target_airspeed_cm = 100 * 0.5 * (aparm.airspeed_cruise + aparm.airspeed_min);
     }
     switch (type_slope_stage) {
     case SlopeStage::NORMAL:
-        target_airspeed_cm = aparm.airspeed_cruise_cm;
+        target_airspeed_cm = aparm.airspeed_cruise*100;
         break;
     case SlopeStage::APPROACH:
         break;
@@ -368,9 +369,9 @@ int32_t AP_Landing::type_slope_get_target_airspeed_cm(void)
 
     // when landing, add half of head-wind.
     const float head_wind_comp = constrain_float(wind_comp, 0.0f, 100.0f)*0.01;
-    const int32_t head_wind_compensation_cm = head_wind() * head_wind_comp * 100;
+    const int32_t head_wind_compensation_cm = ahrs.head_wind() * head_wind_comp * 100;
 
-    const uint32_t max_airspeed_cm = AP_Landing::allow_max_airspeed_on_land() ? aparm.airspeed_max*100 : aparm.airspeed_cruise_cm;
+    const uint32_t max_airspeed_cm = AP_Landing::allow_max_airspeed_on_land() ? aparm.airspeed_max*100 : aparm.airspeed_cruise*100;
     
     return constrain_int32(target_airspeed_cm + head_wind_compensation_cm, target_airspeed_cm, max_airspeed_cm);
     
@@ -390,6 +391,12 @@ bool AP_Landing::type_slope_is_flaring(void) const
     return (type_slope_stage == SlopeStage::FINAL);
 }
 
+bool AP_Landing::type_slope_is_on_final(void) const
+{
+    return (type_slope_stage == SlopeStage::PREFLARE ||
+            type_slope_stage == SlopeStage::FINAL);
+}
+
 bool AP_Landing::type_slope_is_on_approach(void) const
 {
     return (type_slope_stage == SlopeStage::APPROACH ||
@@ -398,8 +405,7 @@ bool AP_Landing::type_slope_is_on_approach(void) const
 
 bool AP_Landing::type_slope_is_expecting_impact(void) const
 {
-    return (type_slope_stage == SlopeStage::PREFLARE ||
-            type_slope_stage == SlopeStage::FINAL);
+    return type_slope_is_on_final();
 }
 
 bool AP_Landing::type_slope_is_complete(void) const
@@ -407,6 +413,7 @@ bool AP_Landing::type_slope_is_complete(void) const
     return (type_slope_stage == SlopeStage::FINAL);
 }
 
+#if HAL_LOGGING_ENABLED
 void AP_Landing::type_slope_log(void) const
 {
 // @LoggerMessage: LAND
@@ -429,6 +436,7 @@ void AP_Landing::type_slope_log(void) const
                                             (double)alt_offset,
                                             (double)height_flare_log);
 }
+#endif
 
 bool AP_Landing::type_slope_is_throttle_suppressed(void) const
 {

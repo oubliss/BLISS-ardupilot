@@ -12,6 +12,7 @@ on:
       # remove non SITL HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_ESP32/**'
+      - 'libraries/AP_HAL_QURT/**'
       # remove non SITL directories
       - 'Tools/bootloaders/**'
       - 'Tools/CHDK-Script/**'
@@ -28,7 +29,6 @@ on:
       - 'Tools/Hello/**'
       - 'Tools/IO_Firmware/**'
       - 'Tools/Linux_HAL_Essentials/**'
-      - 'Tools/LogAnalyzer/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
@@ -87,6 +87,7 @@ on:
       # remove non SITL HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_ESP32/**'
+      - 'libraries/AP_HAL_QURT/**'
       # remove non SITL directories
       - 'Tools/bootloaders/**'
       - 'Tools/CHDK-Script/**'
@@ -159,11 +160,11 @@ concurrency:
 
 jobs:
   build-gcc-ap_periph:
-    runs-on: ubuntu-20.04
-    container: ardupilot/ardupilot-dev-periph:v0.0.29
+    runs-on: ubuntu-22.04
+    container: ardupilot/ardupilot-dev-periph:v0.1.3
     steps:
       # git checkout the PR
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
       # Put ccache into github cache for faster build
@@ -173,7 +174,7 @@ jobs:
           NOW=$(date -u +"%F-%T")
           echo "timestamp=${NOW}" >> $GITHUB_OUTPUT
       - name: ccache cache files
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ccache
           key: ${{github.workflow}}-ccache-${{steps.ccache_cache_timestamp.outputs.timestamp}}
@@ -185,23 +186,24 @@ jobs:
       - name: run dronecan dsdlc generator test
         run: |
           PATH="/github/home/.local/bin:$PATH"
-          python modules/DroneCAN/dronecan_dsdlc/dronecan_dsdlc.py -O dsdlc_generated modules/DroneCAN/DSDL/uavcan modules/DroneCAN/DSDL/dronecan modules/DroneCAN/DSDL/com --run-test
+          python3 -m pip install --upgrade dronecan
+          python3 modules/DroneCAN/dronecan_dsdlc/dronecan_dsdlc.py -O dsdlc_generated modules/DroneCAN/DSDL/uavcan modules/DroneCAN/DSDL/dronecan modules/DroneCAN/DSDL/com --run-test
 
-      - name: build sitl_periph_gps
+      - name: build sitl_periph_universal
         shell: bash
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
           PATH="/github/home/.local/bin:$PATH"
-          ./waf configure --board sitl_periph_gps
+          ./waf configure --board sitl_periph_universal --debug
           ./waf build --target bin/AP_Periph
           ccache -s
           ccache -z
 
   autotest-can:
     needs: build-gcc-ap_periph  # don't try to launch the tests matrix if it doesn't build first, profit from caching for fast build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     container: 
-      image: ardupilot/ardupilot-dev-periph:v0.0.29
+      image: ardupilot/ardupilot-dev-periph:v0.1.3
       options: --privileged
     strategy:
       fail-fast: false  # don't cancel if a job from the matrix fails
@@ -212,7 +214,7 @@ jobs:
 
     steps:
       # git checkout the PR
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: 'recursive'
       # Put ccache into github cache for faster build
@@ -222,7 +224,7 @@ jobs:
           NOW=$(date -u +"%F-%T")
           echo "timestamp=${NOW}" >> $GITHUB_OUTPUT
       - name: ccache cache files
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.ccache
           key: ${{github.workflow}}-ccache-${{steps.ccache_cache_timestamp.outputs.timestamp}}

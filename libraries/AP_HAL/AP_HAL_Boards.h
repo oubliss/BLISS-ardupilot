@@ -1,21 +1,25 @@
 /**
- * C preprocesor enumeration of the boards supported by the AP_HAL.
+ * C preprocessor enumeration of the boards supported by the AP_HAL.
  * This list exists so HAL_BOARD == HAL_BOARD_xxx preprocessor blocks
  * can be used to exclude HAL boards from the build when appropriate.
  * It's not an elegant solution but we can improve it in future.
  */
 #pragma once
 
+// @LoggerEnum: HAL_BOARD
 #define HAL_BOARD_SITL     3
-#define HAL_BOARD_SMACCM   4  // unused
-#define HAL_BOARD_PX4      5  // unused
+// #define HAL_BOARD_SMACCM   4  // unused
+// #define HAL_BOARD_PX4      5  // unused
 #define HAL_BOARD_LINUX    7
-#define HAL_BOARD_VRBRAIN  8
+// #define HAL_BOARD_VRBRAIN  8
 #define HAL_BOARD_CHIBIOS  10
-#define HAL_BOARD_F4LIGHT  11 // reserved
+// #define HAL_BOARD_F4LIGHT  11 // reserved
 #define HAL_BOARD_ESP32	   12
+#define HAL_BOARD_QURT     13
 #define HAL_BOARD_EMPTY    99
+// @LoggerEnumEnd
 
+// @LoggerEnum: HAL_BOARD_SUBTYPE
 /* Default board subtype is -1 */
 #define HAL_BOARD_SUBTYPE_NONE -1
 
@@ -42,23 +46,25 @@
 #define HAL_BOARD_SUBTYPE_LINUX_NAVIGATOR  1023
 #define HAL_BOARD_SUBTYPE_LINUX_VNAV       1024
 #define HAL_BOARD_SUBTYPE_LINUX_OBAL_V1    1025
-
+#define HAL_BOARD_SUBTYPE_LINUX_CANZERO    1026
+#define HAL_BOARD_SUBTYPE_LINUX_PILOTPI    1027
+#define HAL_BOARD_SUBTYPE_LINUX_POCKET2    1028
 /* HAL CHIBIOS sub-types, starting at 5000
 
    NOTE!! Do not add more subtypes unless they are really needed. Most
    boards do not need a subtype defined. It is only needed if we need
    to use #ifdef'd code to change behaviour
 */
-#define HAL_BOARD_SUBTYPE_CHIBIOS_SKYVIPER_F412	5000
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_SKYVIPER_F412	5000
 #define HAL_BOARD_SUBTYPE_CHIBIOS_FMUV3         5001
-#define HAL_BOARD_SUBTYPE_CHIBIOS_FMUV4         5002
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_FMUV4         5002
 #define HAL_BOARD_SUBTYPE_CHIBIOS_GENERIC       5009
 #define HAL_BOARD_SUBTYPE_CHIBIOS_FMUV5         5013
-#define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V51   5016
-#define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V52   5017
-#define HAL_BOARD_SUBTYPE_CHIBIOS_VRUBRAIN_V51  5018
-#define HAL_BOARD_SUBTYPE_CHIBIOS_VRCORE_V10    5019
-#define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V54   5020
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V51   5016
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V52   5017
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_VRUBRAIN_V51  5018
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_VRCORE_V10    5019
+// #define HAL_BOARD_SUBTYPE_CHIBIOS_VRBRAIN_V54   5020
 
 #define HAL_BOARD_SUBTYPE_ESP32_DIY             6001
 #define HAL_BOARD_SUBTYPE_ESP32_ICARUS          6002
@@ -67,6 +73,10 @@
 #define HAL_BOARD_SUBTYPE_ESP32_TOMTE76         6005
 #define HAL_BOARD_SUBTYPE_ESP32_NICK            6006
 #define HAL_BOARD_SUBTYPE_ESP32_S3DEVKIT        6007
+#define HAL_BOARD_SUBTYPE_ESP32_S3EMPTY         6008
+#define HAL_BOARD_SUBTYPE_ESP32_S3M5STAMPFLY    6009
+#define HAL_BOARD_SUBTYPE_ESP32_IMU_MODULE_V11  6010
+// @LoggerEnumEnd
 
 /* InertialSensor driver types */
 #define HAL_INS_NONE         0
@@ -80,13 +90,6 @@
 #define HAL_INS_INV2_I2C    24
 #define HAL_INS_INV2_SPI    25
 
-
-/* Barometer driver types */
-#define HAL_BARO_NONE        0
-#define HAL_BARO_HIL_UNUSED  6  // unused
-#define HAL_BARO_20789_I2C_I2C  14
-#define HAL_BARO_20789_I2C_SPI  15
-#define HAL_BARO_LPS25H_IMU_I2C 17
 
 /* Heat Types */
 #define HAL_LINUX_HEAT_PWM 1
@@ -131,12 +134,12 @@
     #include <AP_HAL/board/linux.h>
 #elif CONFIG_HAL_BOARD == HAL_BOARD_EMPTY
     #include <AP_HAL/board/empty.h>
-#elif CONFIG_HAL_BOARD == HAL_BOARD_VRBRAIN
-    #include <AP_HAL/board/vrbrain.h>
 #elif CONFIG_HAL_BOARD == HAL_BOARD_CHIBIOS
 	#include <AP_HAL/board/chibios.h>
 #elif CONFIG_HAL_BOARD == HAL_BOARD_ESP32
     #include <AP_HAL/board/esp32.h>
+#elif CONFIG_HAL_BOARD == HAL_BOARD_QURT
+    #include <AP_HAL/board/qurt.h>
 #else
 #error "Unknown CONFIG_HAL_BOARD type"
 #endif
@@ -145,8 +148,20 @@
 #error "No CONFIG_HAL_BOARD_SUBTYPE set"
 #endif
 
+// HAL_PROGRAM_SIZE_LIMIT_KB is the amount of space we have for
+// instructions.  on ChibiOS this is the sum of onboard and external
+// flash.  BOARD_FLASH_SIZE is reserved for use in the HAL backends
+// (usually only ChibiOS) and should not be used in general code.
+#ifndef HAL_PROGRAM_SIZE_LIMIT_KB
+#error HAL_PROGRAM_SIZE_LIMIT_KB must be defined
+#endif
+
 #ifndef HAL_OS_SOCKETS
 #define HAL_OS_SOCKETS 0
+#endif
+
+#ifndef HAL_OS_POSIX_IO
+#define HAL_OS_POSIX_IO 0
 #endif
 
 #ifndef HAL_PARAM_DEFAULTS_PATH
@@ -161,31 +176,37 @@
 #define HAL_NUM_CAN_IFACES 0
 #endif
 
-#ifndef HAL_RCINPUT_WITH_AP_RADIO
-#define HAL_RCINPUT_WITH_AP_RADIO 0
-#endif
-
 #ifndef HAL_WITH_IO_MCU
 #define HAL_WITH_IO_MCU 0
 #endif
 
+#ifndef HAL_WITH_IO_MCU_BIDIR_DSHOT
+#define HAL_WITH_IO_MCU_BIDIR_DSHOT 0
+#endif
+
 #ifndef HAL_WITH_IO_MCU_DSHOT
-#define HAL_WITH_IO_MCU_DSHOT 0
+#define HAL_WITH_IO_MCU_DSHOT HAL_WITH_IO_MCU_BIDIR_DSHOT
 #endif
 
-// this is used as a general mechanism to make a 'small' build by
-// dropping little used features. We use this to allow us to keep
-// FMUv2 going for as long as possible
-#ifndef HAL_MINIMIZE_FEATURES
-#define HAL_MINIMIZE_FEATURES       0
+#ifndef HAL_REQUIRES_BDSHOT_SUPPORT
+#define HAL_REQUIRES_BDSHOT_SUPPORT (defined(HAL_WITH_BIDIR_DSHOT) || HAL_WITH_IO_MCU_BIDIR_DSHOT)
 #endif
 
-#ifndef BOARD_FLASH_SIZE
-#define BOARD_FLASH_SIZE 2048
+#ifndef AP_NOTIFY_TONEALARM_ENABLED
+#define AP_NOTIFY_TONEALARM_ENABLED 0
+#endif
+
+// support for Extended DShot Telemetry v2 is enabled only if any kind of such telemetry
+// can in principle arrive, either from servo outputs or from IOMCU
+
+// if not desired, set to 0 - and if IOMCU has bidirectional DShot enabled, recompile it too,
+// otherwise the communication to IOMCU breaks!
+#ifndef AP_EXTENDED_DSHOT_TELEM_V2_ENABLED
+#define AP_EXTENDED_DSHOT_TELEM_V2_ENABLED HAL_REQUIRES_BDSHOT_SUPPORT
 #endif
 
 #ifndef HAL_GYROFFT_ENABLED
-#define HAL_GYROFFT_ENABLED (BOARD_FLASH_SIZE > 1024)
+#define HAL_GYROFFT_ENABLED (HAL_PROGRAM_SIZE_LIMIT_KB > 1024)
 #endif
 
 // enable AP_GyroFFT library only if required:
@@ -193,8 +214,16 @@
 #define HAL_WITH_DSP HAL_GYROFFT_ENABLED
 #endif
 
+#ifndef AP_HAL_UARTDRIVER_ENABLED
+#define AP_HAL_UARTDRIVER_ENABLED 1
+#endif
+
 #ifndef HAL_OS_FATFS_IO
 #define HAL_OS_FATFS_IO 0
+#endif
+
+#ifndef HAL_OS_LITTLEFS_IO
+#define HAL_OS_LITTLEFS_IO 0
 #endif
 
 #ifndef HAL_BARO_DEFAULT
@@ -205,8 +234,8 @@
 #define HAL_INS_DEFAULT HAL_INS_NONE
 #endif
 
-#ifndef HAL_GPS_TYPE_DEFAULT
-#define HAL_GPS_TYPE_DEFAULT 1
+#ifndef HAL_GPS1_TYPE_DEFAULT
+#define HAL_GPS1_TYPE_DEFAULT 1
 #endif
 
 #ifndef HAL_CAN_DRIVER_DEFAULT
@@ -239,10 +268,6 @@
 #define HAL_SUPPORT_RCOUT_SERIAL 0
 #endif
 
-#ifndef HAL_FORWARD_OTG2_SERIAL
-#define HAL_FORWARD_OTG2_SERIAL 0
-#endif
-
 #ifndef HAL_HAVE_DUAL_USB_CDC
 #define HAL_HAVE_DUAL_USB_CDC 0
 #endif
@@ -253,10 +278,6 @@
 #else
 #define AP_CAN_SLCAN_ENABLED 0
 #endif
-#endif
-
-#ifndef USE_LIBC_REALLOC
-#define USE_LIBC_REALLOC 1
 #endif
 
 #ifndef AP_HAL_SHARED_DMA_ENABLED
@@ -296,11 +317,11 @@
 #endif
 
 #ifndef HAL_SERIAL_ESC_COMM_ENABLED
-#ifdef DISABLE_SERIAL_ESC_COMM
-#define HAL_SERIAL_ESC_COMM_ENABLED 0
-#else
 #define HAL_SERIAL_ESC_COMM_ENABLED 1
 #endif
+
+#ifndef AP_BOOTLOADER_FLASHING_ENABLED
+#define AP_BOOTLOADER_FLASHING_ENABLED 0
 #endif
 
 #ifndef HAL_HNF_MAX_FILTERS
@@ -318,7 +339,8 @@
 #else
 // Enough for a notch per motor on an octa quad using two IMUs and one harmonic
 // plus one static notch with one harmonic
-#define HAL_HNF_MAX_FILTERS 18
+// Or triple-notch per motor on one IMU with one harmonic
+#define HAL_HNF_MAX_FILTERS 24
 #endif
 #endif // HAL_HNF_MAX_FILTERS
 
@@ -348,11 +370,42 @@
 #define __EXTFLASHFUNC__
 #endif
 
+// Use __INITFUNC__ to mark functions which are only called once, at
+// boot.  On some boards we choose to put such functions into areas of
+// flash memory which are slower than others.
+#ifndef __INITFUNC__
+#define __INITFUNC__ __EXTFLASHFUNC__
+#endif
+
 #ifndef HAL_ENABLE_DFU_BOOT
 #define HAL_ENABLE_DFU_BOOT 0
 #endif
 
 
 #ifndef HAL_ENABLE_SENDING_STATS
-#define HAL_ENABLE_SENDING_STATS BOARD_FLASH_SIZE >= 256
+#define HAL_ENABLE_SENDING_STATS HAL_PROGRAM_SIZE_LIMIT_KB >= 256
+#endif
+
+#ifndef HAL_GPIO_LED_ON
+#define HAL_GPIO_LED_ON 0
+#elif HAL_GPIO_LED_ON == 0
+#error "Do not specify HAL_GPIO_LED_ON if you are setting it to the default, 0"
+#endif
+
+#ifdef HAL_GPIO_LED_OFF
+#error "HAL_GPIO_LED_OFF must not be defined, it is implicitly !HAL_GPIO_LED_ON"
+#endif
+
+#ifndef HAL_WITH_POSTYPE_DOUBLE
+#define HAL_WITH_POSTYPE_DOUBLE HAL_PROGRAM_SIZE_LIMIT_KB > 1024
+#endif
+
+#ifndef HAL_INS_RATE_LOOP
+#define HAL_INS_RATE_LOOP 0
+#endif
+
+#define HAL_GPIO_LED_OFF (!HAL_GPIO_LED_ON)
+
+#ifndef HAL_REBOOT_ON_MEMORY_ERRORS
+#define HAL_REBOOT_ON_MEMORY_ERRORS defined(IOMCU_FW)
 #endif
