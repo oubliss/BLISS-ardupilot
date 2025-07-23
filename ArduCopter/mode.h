@@ -315,6 +315,8 @@ public:
             CIRCLE =           8,  // use AC_Circle's provided yaw (used during Loiter-Turns commands)
             PILOT_RATE =       9,  // target rate from pilot stick
             WEATHERVANE =     10,  // yaw into wind
+            AUTO_YAW_INTO_WIND = 11, // BLISS wind vane
+            AUTO_YAW_WIND_CT2 = 12, // BLISS CT2
         };
 
         // mode(): current method of determining desired yaw:
@@ -357,6 +359,12 @@ public:
         float look_ahead_yaw();
 
         float roi_yaw() const;
+        float turn_into_wind(); // CASS: wind messanger to autopilot
+        float turn_into_wind_CT2(); // CASS: vector difference between wind and displacement vectors
+
+        // CASS: wind direction and heading in turn_into_wind
+        float _wind_yaw;
+        float _wind_CT2_yaw;
 
         // auto flight mode's yaw mode
         Mode _mode = Mode::LOOK_AT_NEXT_WP;

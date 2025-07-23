@@ -244,17 +244,17 @@ const AP_Scheduler::Task Copter::scheduler_tasks[] = {
 #ifdef USERHOOK_FASTLOOP
     SCHED_TASK(userhook_FastLoop,    100,     75, 153),
 #endif
-#ifdef USERHOOK_50HZLOOP
-    SCHED_TASK(userhook_50Hz,         50,     75, 156),
+#ifdef USER_VPBATT_MNTR_LOOP
+    SCHED_TASK(user_vpbatt_monitor,         10,     75, 156),
 #endif
-#ifdef USERHOOK_MEDIUMLOOP
-    SCHED_TASK(userhook_MediumLoop,   10,     75, 159),
+#ifdef USER_TEMPERATURE_LOOP
+    SCHED_TASK(user_temperature_logger,   10,     75, 159),
 #endif
-#ifdef USERHOOK_SLOWLOOP
-    SCHED_TASK(userhook_SlowLoop,      3.3,   75, 162),
+#ifdef USER_HUMIDITY_LOOP
+    SCHED_TASK(user_humidity_logger,      10,   75, 162),
 #endif
-#ifdef USERHOOK_SUPERSLOWLOOP
-    SCHED_TASK(userhook_SuperSlowLoop, 1,     75, 165),
+#ifdef USER_WIND_LOOP
+    SCHED_TASK(user_wind_vane, 10,     75, 165),
 #endif
 #if HAL_BUTTON_ENABLED
     SCHED_TASK_CLASS(AP_Button,            &copter.button,              update,           5, 100, 168),

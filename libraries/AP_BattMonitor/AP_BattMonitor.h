@@ -237,6 +237,12 @@ public:
         return _params[instance]._serial_number;
     }
 
+    /// BLISS - return low voltage threshold
+    int32_t get_low_voltage() const { return get_low_voltage(AP_BATT_PRIMARY_INSTANCE); }
+    int32_t get_low_voltage(uint8_t instance) const {
+        return _params[instance]._low_voltage;
+    }
+
     /// true when (voltage * current) > watt_max
     bool overpower_detected() const;
     bool overpower_detected(uint8_t instance) const;

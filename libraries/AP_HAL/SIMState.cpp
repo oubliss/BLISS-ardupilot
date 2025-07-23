@@ -292,7 +292,21 @@ void SIMState::_simulator_servos(struct sitl_input &input)
     } else if (_sitl && (now - wind_start_delay_micros) > 5000000 ) {
         // The EKF does not like step inputs so this LPF keeps it happy.
         wind_speed =     _sitl->wind_speed_active     = (0.95f*_sitl->wind_speed_active)     + (0.05f*_sitl->wind_speed);
-        wind_direction = _sitl->wind_direction_active = (0.95f*_sitl->wind_direction_active) + (0.05f*_sitl->wind_direction);
+
+        if(is_zero(_sitl->wind_direction)){
+            if(altitude<1030){
+                wind_direction  = -(2.82e-11f)*powf(altitude,5) + (6.71451e-8f)*powf(altitude,4) - (5.62104222e-5f)*powf(altitude,3) + (2.00937168714e-2f)*powf(altitude,2) - 2.9089387983472f*altitude + 235.34632f;
+                wind_direction = fmodf(wind_direction,360.0f);
+                wind_direction = _sitl->wind_direction_active = (0.95f*_sitl->wind_direction_active) + (0.05f*wind_direction);
+            }
+            else{
+                wind_direction = _sitl->wind_direction_active = (0.95f*_sitl->wind_direction_active) + (0.05f*_sitl->wind_direction);
+            }
+        }
+        else{
+            wind_direction = _sitl->wind_direction_active = (0.95f*_sitl->wind_direction_active) + (0.05f*_sitl->wind_direction);
+        }
+        
         wind_dir_z =     _sitl->wind_dir_z_active     = (0.95f*_sitl->wind_dir_z_active)     + (0.05f*_sitl->wind_dir_z);
         
         // pass wind into simulators using different wind types via param SIM_WIND_T*.

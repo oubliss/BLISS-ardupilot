@@ -70,6 +70,10 @@ void Copter::init_ardupilot()
     // sets up motors and output to escs
     init_rc_out();
 
+    // initialize CASS_Imet sensors
+    init_CASS_imet();
+    init_CASS_hyt271();
+
     // check if we should enter esc calibration mode
     esc_calibration_startup_check();
 
