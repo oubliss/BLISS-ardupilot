@@ -27,20 +27,23 @@ AC_CASS_Imet::AC_CASS_Imet() :
 
 bool AC_CASS_Imet::init(uint8_t busId, uint8_t i2cAddr)
 {
-    flag = false;
     adc_thermistor = 0;
     adc_source = 0;
-    runs = 0;
+    buffer_idx = 0;
 
-    for(uint8_t i=0; i<3; i++){
-        memset(coeff,1.0,sizeof(coeff));
+    // Initialize buffers and coefficients
+    for (uint8_t i = 0; i < MEDIAN_WINDOW_SIZE; i++) {
+        source_buffer[i] = 0;
+    }
+    for (uint8_t i = 0; i < 4; i++) {
+        coeff[i] = 1.0f;
     }
 
     config = ADS1115_REG_CONFIG_CQUE_NONE    | // Disable the comparator (default val)
              ADS1115_REG_CONFIG_CLAT_NONLAT  | // Non-latching (default val)
              ADS1115_REG_CONFIG_CPOL_ACTVLOW | // Alert/Rdy active low   (default val)
              ADS1115_REG_CONFIG_CMODE_TRAD   | // Traditional comparator (default val)
-             ADS1115_REG_CONFIG_DR_16SPS     | // 16 samples (conversions) per second
+             ADS1115_REG_CONFIG_DR_32SPS     | // 32 SPS (~31.25ms/conversion, allows 2 per 100ms callback)
              ADS1115_REG_CONFIG_MODE_SINGLE  | // Single-shot mode (default)
              ADS1115_REG_CONFIG_PGA_6_144V   | // Set PGA/voltage range
              ADS1115_REG_CONFIG_OS_SINGLE;     // Start single-conversion
@@ -122,8 +125,8 @@ bool AC_CASS_Imet::_read_adc(float &value)
         if (!_dev->transfer(&cmd, sizeof(cmd), status, sizeof(status))) {
             return false;
         }
-        // Timeout after 10ms of no answering
-        if ((AP_HAL::millis() - now) > 10){
+        // Timeout after 40ms (accommodates 32 SPS conversion time of ~31.25ms)
+        if ((AP_HAL::millis() - now) > 40){
             return false;
         }
         // Checksum to determine if the sensor is busy or not
@@ -137,48 +140,89 @@ bool AC_CASS_Imet::_read_adc(float &value)
         return false;
     }
 
-    // Convert bytes to a floating point number and send
-    value = (float)((data[0] << 8) | data[1]);
+    // Convert bytes to a signed 16-bit value (required for differential mode)
+    // Differential measurements can be negative (AIN0 < AIN1)
+    int16_t raw = (int16_t)((data[0] << 8) | data[1]);
+    value = (float)raw;
     return true;
+}
+
+float AC_CASS_Imet::_median_filter(float *buffer, uint8_t size)
+{
+    // Create a local copy to sort (avoid modifying the circular buffer)
+    float sorted[MEDIAN_WINDOW_SIZE];
+    for (uint8_t i = 0; i < size; i++) {
+        sorted[i] = buffer[i];
+    }
+
+    // Simple insertion sort - efficient for small arrays
+    for (uint8_t i = 1; i < size; i++) {
+        float key = sorted[i];
+        int8_t j = i - 1;
+        while (j >= 0 && sorted[j] > key) {
+            sorted[j + 1] = sorted[j];
+            j--;
+        }
+        sorted[j + 1] = key;
+    }
+
+    // Return middle element (median)
+    return sorted[size / 2];
 }
 
 void AC_CASS_Imet::_timer(void)
 {
-    // Retreive data from sensor by I2C
-    float temp = adc_source;
-    bool temp_healthy;
-    // Collect thermistor and source measurements from the sensor by I2C
-    if(flag == false){
-        temp_healthy = _read_adc(adc_thermistor);
-        runs += 1;
-    }
-    else{
-        temp_healthy = _read_adc(temp);
-        adc_source = 0.95f*adc_source + 0.05f*temp;
-    }   
+    float raw_reading;
+    bool therm_healthy = false;
+    bool source_healthy = false;
 
-    // After 100 samples from the thermistor, re-measure voltage source and update it.
-    if(runs == 100) {
-        _start_conversion(ADS1115_READ_SOURCE);
-        flag = true;
-        runs = 0;
+    // Sequential measurements at 32 SPS: both thermistor and source sampled at 10Hz
+    // Each conversion takes ~31.25ms, total ~62.5ms fits within 100ms callback
+
+    // Step 1: Read thermistor (conversion started at end of previous callback)
+    therm_healthy = _read_adc(raw_reading);
+    if (therm_healthy) {
+        adc_thermistor = raw_reading;  // Direct assignment, no filtering needed
     }
-    else{
-        _start_conversion(ADS1115_READ_THERMISTOR);
-        flag = false; 
+
+    // Step 2: Start source conversion and wait for result
+    _start_conversion(ADS1115_READ_SOURCE);
+    source_healthy = _read_adc(raw_reading);
+    if (source_healthy) {
+        // Store in circular buffer for median filter
+        source_buffer[buffer_idx % MEDIAN_WINDOW_SIZE] = raw_reading;
+        buffer_idx++;
+
+        // Apply median filter first (removes voltage spikes)
+        float median_val = _median_filter(source_buffer, MEDIAN_WINDOW_SIZE);
+
+        // Then apply EMA filter for smoothing (alpha=0.10)
+        if (adc_source > 0) {
+            adc_source = 0.90f * adc_source + 0.10f * median_val;
+        } else {
+            adc_source = median_val;
+        }
     }
+
+    // Step 3: Start thermistor conversion for next callback
+    _start_conversion(ADS1115_READ_THERMISTOR);
 
     WITH_SEMAPHORE(_sem);                          // semaphore for access to shared frontend data
-    _healthy = temp_healthy;                       // report sensor health
-    if (temp_healthy) {                            // If health is false, keep last value
-        _calculate(adc_source, adc_thermistor);    // If data was collected, then calculate temperature and resistance
+    _healthy = therm_healthy && source_healthy;    // report sensor health
+    // adc_thermistor is negative (AIN0 < AIN1), adc_source is positive
+    if (_healthy && adc_thermistor < 0 && adc_source > 0) {
+        _calculate(adc_source, adc_thermistor);    // Calculate temperature and resistance
     }
-
 }
 
-void AC_CASS_Imet::_calculate(float source, float thermistor)
+void AC_CASS_Imet::_calculate(float source, float thermistor_diff)
 {
-    _resist = 64900.0f * (source / thermistor - 1.0f);
-    //converts to temperature (kelvin)
+    // Differential mode: thermistor_diff = AIN0 - AIN1 = -V_thermistor (negative)
+    // V_thermistor_actual = -thermistor_diff
+    // V_fixed = source + thermistor_diff (voltage across R_fixed = V_source - V_thermistor)
+    // R_therm = R_fixed * V_thermistor / V_fixed = R_fixed * (-thermistor_diff) / (source + thermistor_diff)
+    _resist = 64900.0f * (-thermistor_diff) / (source + thermistor_diff);
+
+    // Convert to temperature (Kelvin) using Steinhart-Hart equation
     _temperature = 1.0f / (coeff[0] + coeff[1] * logf(_resist) + coeff[2] * powf(logf(_resist), 2) + coeff[3] * powf(logf(_resist), 3));
 }

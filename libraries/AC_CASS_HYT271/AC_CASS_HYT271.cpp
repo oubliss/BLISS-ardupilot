@@ -37,8 +37,8 @@ bool AC_CASS_HYT271::init(uint8_t busId, uint8_t i2cAddr)
 
     _dev->get_semaphore()->give();
 
-    /* Request 20Hz update */
-    // Max conversion time is 12 ms
+    // Register 10Hz periodic callback (100ms interval)
+    // HYT271 max conversion time is ~60ms, so 100ms provides adequate margin
     _dev->register_periodic_callback(100000,
                                      FUNCTOR_BIND_MEMBER(&AC_CASS_HYT271::_timer, void));
     return true;
@@ -74,21 +74,25 @@ bool AC_CASS_HYT271::_collect(float &hum, float &temp)
     }
 
     WITH_SEMAPHORE(_sem);                           // semaphore for access to shared frontend data
-    // Bit shift and convert to floating point number
-    raw = (data[0] << 8) | data[1];
-    raw = raw & 0x3FFF;
 
-    hum = (100.0 / (powf(2,14) - 1)) * (float)raw;
+    // Extract 14-bit humidity value (bits 13:0 of data[0:1])
+    raw = ((data[0] << 8) | data[1]) & 0x3FFF;
+    // Convert to relative humidity: 0-100% (scale factor = 100.0 / 16383.0)
+    hum = 0.00610388f * (float)raw;
 
-    data[3] = (data[3] >> 2);
-    raw = (data[2] << 6) | data[3];
-    temp = (165.0 / (powf(2,14) - 1)) * (float)raw + 233.15f;
+    // Extract 14-bit temperature value (bits 15:2 of data[2:3])
+    raw = (data[2] << 6) | (data[3] >> 2);
+    // Convert to Kelvin: 233.15K to 398.15K (-40C to +125C) (scale factor = 165.0 / 16383.0)
+    temp = 0.01007141f * (float)raw + 233.15f;
 
     return true;  
 }
 
 void AC_CASS_HYT271::_timer(void)
 {
-    _healthy = _collect(_humidity, _temperature);   // Retreive data from the sensor
-    _measure();                                     // Request a new measurement to the sensor
+    // Two-phase measurement cycle:
+    // 1. Collect data from previous measurement request
+    // 2. Start new measurement for next callback
+    _healthy = _collect(_humidity, _temperature);
+    _measure();
 }

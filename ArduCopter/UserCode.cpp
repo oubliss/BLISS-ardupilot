@@ -19,6 +19,19 @@ uint32_t wvane_now;
 LPFrdFloat filt_thrvec_x;
 LPFrdFloat filt_thrvec_y;
 LPFrdFloat filt_windspd;
+
+// Wind vane constants (all altitude/speed values in cm or cm/s unless noted)
+static constexpr float WVANE_FAN_ON_ALT_CM       = 185.0f;   // Altitude to turn fan ON
+static constexpr float WVANE_FAN_OFF_ALT_CM      = 140.0f;   // Altitude to turn fan OFF (hysteresis)
+static constexpr float WVANE_MIN_ALT_ASC_CM      = 400.0f;   // Min altitude for wind vane while ascending
+static constexpr float WVANE_MIN_ALT_DESC_CM     = 600.0f;   // Min altitude for wind vane while descending
+static constexpr float WVANE_LAT_SPD_THRESH_CMS  = 150.0f;   // Max lateral speed for wind vane active
+static constexpr float WVANE_SPD_MARGIN_CMS      = 300.0f;   // Speed margin for wind vane activation
+static constexpr float WVANE_MIN_WSPD_ASC_MS     = 1.5f;     // Min wind speed for ascending (m/s)
+static constexpr float WVANE_MIN_WSPD_DESC_MS    = 6.0f;     // Min wind speed for descending (m/s)
+static constexpr float WVANE_VERT_VEL_THRESH_CMS = -0.5f;    // Vertical velocity threshold (cm/s, negative=descending)
+static constexpr float WVANE_WIND_HYSTERESIS_MS  = 3.0f;     // Wind speed hysteresis for high wind warning (m/s)
+static constexpr uint16_t WVANE_FAN_PWM_THRESH   = 50;       // PWM threshold for fan state detection
 //g.wind_vane_wsA -> Coefficient A of the linear wind speed equation, from calibration
 //g.wind_vane_wsB -> Coefficient B of the linear wind speed equation, from calibration
 //g.wind_vane_min_roll -> Minimum roll angle that the wind vane will correct (too low and the copter will oscilate)
@@ -318,124 +331,133 @@ void Copter::user_humidity_logger()
 #ifdef USER_WIND_LOOP
 void Copter::user_wind_vane()
 {
-    //Run algo after Copter takes off
-    if(!ap.land_complete && copter.position_ok()){
+    // Run algorithm only after Copter takes off
+    if (!ap.land_complete && copter.position_ok()) {
 
-        //Fan Control ////////////////////////////////////////////////////////////////////////////////////////
+        // Fan Control ////////////////////////////////////////////////////////////////////////////////////////
 
-        //Get AGL altitude in cm
+        // Get AGL altitude in cm
         float alt;
         copter.ahrs.get_relative_position_D_home(alt);
-        alt = -100.0f*alt;
-   
-        //Smart fan on/off logic
-        if(alt > 185.0f && SRV_Channels::get_output_scaled(SRV_Channel::k_egg_drop) < 50){
+        alt = -100.0f * alt;
+
+        // Smart fan on/off logic with hysteresis
+        const uint16_t fan_pwm = SRV_Channels::get_output_scaled(SRV_Channel::k_egg_drop);
+        if (alt > WVANE_FAN_ON_ALT_CM && fan_pwm < WVANE_FAN_PWM_THRESH) {
             SRV_Channels::set_output_scaled(SRV_Channel::k_egg_drop, fan_pwm_on);
             _fan_status = true;
             gcs().send_text(MAV_SEVERITY_INFO, "Scoop Fan activated");
             #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-                printf("FAN ON \n");  //printf("PWM: %5.2f \n",var); //for debugging
+                printf("FAN ON \n");
+            #endif
+        } else if (alt < WVANE_FAN_OFF_ALT_CM && fan_pwm > WVANE_FAN_PWM_THRESH) {
+            SRV_Channels::set_output_scaled(SRV_Channel::k_egg_drop, fan_pwm_off);
+            _fan_status = false;
+            #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
+                printf("FAN OFF \n");
             #endif
         }
-        else{
-            if(alt < 140.0f && SRV_Channels::get_output_scaled(SRV_Channel::k_egg_drop) > 50){
-                SRV_Channels::set_output_scaled(SRV_Channel::k_egg_drop, fan_pwm_off);
-                _fan_status = false;
-                #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-                    printf("FAN OFF \n");  
-                #endif
-            }
-        }
 
-        //Wind Estimator Algorithm //////////////////////////////////////////////////////////////////////////
+        // Wind Estimator Algorithm //////////////////////////////////////////////////////////////////////////
 
-        //Get thurst vector elements from the rotation matrix
-        R13 = -1*copter.ahrs.get_rotation_body_to_ned().a.z;
-        R23 = -1*copter.ahrs.get_rotation_body_to_ned().b.z;
-        R33 = -1*copter.ahrs.get_rotation_body_to_ned().c.z;
+        // Cache rotation matrix (single call instead of three)
+        const Matrix3f &rot_matrix = copter.ahrs.get_rotation_body_to_ned();
+        R13 = -rot_matrix.a.z;
+        R23 = -rot_matrix.b.z;
+        R33 = -rot_matrix.c.z;
 
-        //Wind vane loop starts here. Loop frequency is defined by WVANE_FS param in Hz
-        if((AP_HAL::millis() - wvane_now) >= (uint32_t)(1000/g2.user_parameters.get_wvane_fs())){
-            //Apply Butterworth LPF on each element
-            float thrvec_x, thrvec_y;
-            thrvec_x = filt_thrvec_x.apply(R13);
-            thrvec_y = filt_thrvec_y.apply(R23);
+        // Cache parameters and compute loop period
+        const float wvane_fs = g2.user_parameters.get_wvane_fs();
+        const uint32_t loop_period_ms = (uint32_t)(1000.0f / wvane_fs);
 
-            //Determine wind direction by trigonometry (thrust vector tilt)
-            float wind_psi = fmodf(atan2f(thrvec_y,thrvec_x),2*M_PI)*RAD_TO_DEG + g2.user_parameters.get_wvane_offset();
-            _wind_dir = wrap_360_cd(wind_psi*100.0f);
+        // Wind vane loop - frequency defined by WVANE_FS param in Hz
+        if ((AP_HAL::millis() - wvane_now) >= loop_period_ms) {
 
-            //Estimate wind speed with filtered parameters
-            float R_xy = safe_sqrt(R13*R13 + R23*R23);
-            _wind_speed = g2.user_parameters.get_wvane_wsA() * fabsf(R_xy/R33) + g2.user_parameters.get_wvane_wsB()*safe_sqrt(fabsf(R_xy/R33));
-            _wind_speed = _wind_speed < 0 ? 0.0f : _wind_speed;
-            _wind_speed = filt_windspd.apply(_wind_speed);
+            // Cache frequently used parameters
+            const float wvane_offset = g2.user_parameters.get_wvane_offset();
+            const float wvane_wsA = g2.user_parameters.get_wvane_wsA();
+            const float wvane_wsB = g2.user_parameters.get_wvane_wsB();
+            const float wvane_spd_tol = g2.user_parameters.get_wvane_spd_tol();
+            const float wvane_enabled = g2.user_parameters.get_wvane_enabled();
 
-            //Get current velocity
-            Vector3f vel_xyz = copter.inertial_nav.get_velocity_neu_cms(); // NEU convention
-            float tyaw = copter.wp_nav->get_yaw()*DEG_TO_RAD/100.0f;
-            float speed_y = vel_xyz.y*cosf(tyaw) - vel_xyz.x*sinf(tyaw); // Get lateral velocity in body frame
-            float speed = norm(vel_xyz.x,vel_xyz.y); 
-            
-            //Wind vane is active when flying horizontally steady and wind speed is perceivable
-            //Condition when ascending (including hovering)
-            if(fabsf(speed_y) < 150.0f && _wind_speed > 1.5f && vel_xyz[2] >= -0.5f){
-                //Min altitude and speed at which the yaw command is sent
-                if(alt>400.0f && speed<(fabsf(speed_y)+300.0f)){ 
-                    //Send estimated wind direction to the autopilot
+            // Apply Butterworth LPF on thrust vector elements
+            const float thrvec_x = filt_thrvec_x.apply(R13);
+            const float thrvec_y = filt_thrvec_y.apply(R23);
+
+            // Determine wind direction by trigonometry (thrust vector tilt)
+            const float wind_psi = fmodf(atan2f(thrvec_y, thrvec_x), 2.0f * M_PI) * RAD_TO_DEG + wvane_offset;
+            _wind_dir = wrap_360_cd(wind_psi * 100.0f);
+
+            // Estimate wind speed with filtered parameters
+            const float R_xy = safe_sqrt(R13 * R13 + R23 * R23);
+            const float tilt_ratio = fabsf(R_xy / R33);
+            float wind_speed_raw = wvane_wsA * tilt_ratio + wvane_wsB * safe_sqrt(tilt_ratio);
+            wind_speed_raw = MAX(wind_speed_raw, 0.0f);
+            _wind_speed = filt_windspd.apply(wind_speed_raw);
+
+            // Get current velocity
+            const Vector3f vel_xyz = copter.inertial_nav.get_velocity_neu_cms();  // NEU convention
+            const float tyaw = copter.wp_nav->get_yaw() * DEG_TO_RAD / 100.0f;
+            const float speed_y = vel_xyz.y * cosf(tyaw) - vel_xyz.x * sinf(tyaw);  // Lateral velocity in body frame
+            const float speed = norm(vel_xyz.x, vel_xyz.y);
+            const float abs_speed_y = fabsf(speed_y);  // Cache this value
+
+            // Wind vane is active when flying horizontally steady and wind speed is perceivable
+            const bool lateral_speed_ok = abs_speed_y < WVANE_LAT_SPD_THRESH_CMS;
+            const bool speed_margin_ok = speed < (abs_speed_y + WVANE_SPD_MARGIN_CMS);
+
+            // Condition when ascending (including hovering)
+            if (lateral_speed_ok && _wind_speed > WVANE_MIN_WSPD_ASC_MS && vel_xyz.z >= WVANE_VERT_VEL_THRESH_CMS) {
+                if (alt > WVANE_MIN_ALT_ASC_CM && speed_margin_ok) {
+                    // Send estimated wind direction to the autopilot
                     copter.cass_wind_direction = _wind_dir;
                     copter.cass_wind_speed = _wind_speed;
-                }
-                else{
-                    //Send neutral values
+                } else {
+                    // Send neutral values
                     copter.cass_wind_direction = copter.wp_nav->get_yaw();
                     copter.cass_wind_speed = 0.0f;
                 }
             }
-            //Condition when descending
-            else if (fabsf(speed_y) < 150.0f && _wind_speed > 6.0f && vel_xyz[2] < -0.5f){
-                if(alt>600.0f && speed<(fabsf(speed_y)+300.0f)){ 
-                    //Send estimated wind direction to the autopilot
+            // Condition when descending
+            else if (lateral_speed_ok && _wind_speed > WVANE_MIN_WSPD_DESC_MS && vel_xyz.z < WVANE_VERT_VEL_THRESH_CMS) {
+                if (alt > WVANE_MIN_ALT_DESC_CM && speed_margin_ok) {
+                    // Send estimated wind direction to the autopilot
                     copter.cass_wind_direction = _wind_dir;
                     copter.cass_wind_speed = _wind_speed;
-                }
-                else{
-                    //Do nothing - keep yaw equal to last wind direction estimate
+                } else {
+                    // Keep yaw equal to last wind direction estimate
                     copter.cass_wind_speed = 0.0f;
                 }
-            }
-            else{
-                //Reset 1st order filter
+            } else {
+                // Reset 1st order filter
                 last_yrate = 0.0f;
             }
 
-            //Switch to RTL automatically if wind speed is too high (in m/s)
-            //If tolerance is set to zero then auto RTL is disabled but it will still warn if enabled
-            if(!is_zero(g2.user_parameters.get_wvane_spd_tol())){
-                if(_wind_speed > g2.user_parameters.get_wvane_spd_tol() && high_wind_flag == false && copter.flightmode->is_autopilot()){
+            // High wind protection - auto RTL if wind speed exceeds tolerance
+            // If tolerance is set to zero, auto RTL is disabled but warning still active if enabled
+            if (!is_zero(wvane_spd_tol)) {
+                if (_wind_speed > wvane_spd_tol && !high_wind_flag && copter.flightmode->is_autopilot()) {
                     gcs().send_text(MAV_SEVERITY_WARNING, "Warning high wind: Switch to RTL");
-                    if(!is_zero(g2.user_parameters.get_wvane_enabled())){
+                    if (!is_zero(wvane_enabled)) {
                         copter.set_mode(Mode::Number::RTL, ModeReason::UNKNOWN);
                     }
                     high_wind_flag = true;
-                }
-                else if(_wind_speed < (g2.user_parameters.get_wvane_spd_tol() - 3.0f) && high_wind_flag == true){
+                } else if (_wind_speed < (wvane_spd_tol - WVANE_WIND_HYSTERESIS_MS) && high_wind_flag) {
                     high_wind_flag = false;
                     gcs().send_text(MAV_SEVERITY_INFO, "High wind warning cleared");
                 }
             }
 
-            //Update last loop time
+            // Update last loop time
             wvane_now = AP_HAL::millis();
         }
-        
-    }
-    else{
-        //Reset all global parameters to default values
+
+    } else {
+        // Reset all global parameters to default values when landed
         copter.cass_wind_direction = (float)copter.initial_armed_bearing;
         copter.cass_wind_speed = 0.0f;
         SRV_Channels::set_output_scaled(SRV_Channel::k_egg_drop, fan_pwm_off);
-        last_yrate = 0;
+        last_yrate = 0.0f;
         _fan_status = false;
         filt_thrvec_x.reset();
         filt_thrvec_y.reset();
@@ -447,7 +469,7 @@ void Copter::user_wind_vane()
     struct log_WIND pkt_wind_est = {
         LOG_PACKET_HEADER_INIT(LOG_WIND_MSG),
         time_stamp             : AP_HAL::micros64(),
-        _wind_dir              : _wind_dir/100,
+        _wind_dir              : _wind_dir / 100.0f,
         _wind_speed            : _wind_speed,
         _R13                   : R13,
         _R23                   : R23,
