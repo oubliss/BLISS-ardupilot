@@ -10,6 +10,8 @@ AC_CASS_HYT271::AC_CASS_HYT271() :
     _dev(nullptr),
     _temperature(0),
     _humidity(0),
+    _humidity_corrected(0),
+    _iT(0),
     _healthy(false)
 {
 }
@@ -50,6 +52,18 @@ void AC_CASS_HYT271::set_i2c_addr(uint8_t addr){
     }
 }
 
+void AC_CASS_HYT271::set_sensor_coeff(float *k){
+    for(uint8_t i=0; i<6; i++){
+        coeff[i] = k[i];
+    }
+}
+
+void AC_CASS_HYT271::set_iT(float iT)
+{
+    WITH_SEMAPHORE(_sem);
+    _iT = iT;
+}
+
 bool AC_CASS_HYT271::_measure()
 {
     uint8_t cmd = 0x00;
@@ -59,7 +73,7 @@ bool AC_CASS_HYT271::_measure()
         return true;
 }
 
-bool AC_CASS_HYT271::_collect(float &hum, float &temp)
+bool AC_CASS_HYT271::_collect(float &hum, float &hum_corr, float &temp)
 {
     uint8_t data[4];
     int16_t raw;
@@ -80,6 +94,22 @@ bool AC_CASS_HYT271::_collect(float &hum, float &temp)
     // Convert to relative humidity: 0-100% (scale factor = 100.0 / 16383.0)
     hum = 0.00610388f * (float)raw;
 
+    if (_iT >= 200.0f) {
+        // poly22 surface fit: f(h,T) = p00 + p10*h + p01*T + p20*h^2 + p11*h*T + p02*T^2
+        // Coefficient layout matches SWX_calibration_surface_iT.csv column order.
+        const float h = hum;
+        const float T = _iT;
+        hum_corr = coeff[0]
+                 + coeff[1]*h
+                 + coeff[2]*T
+                 + coeff[3]*h*h
+                 + coeff[4]*h*T
+                 + coeff[5]*T*T;
+        hum_corr = constrain_float(hum_corr, 0.0f, 100.0f);
+    } else {
+        hum_corr = hum;   // no valid iT yet — fall back to raw humidity
+    }
+
     // Extract 14-bit temperature value (bits 15:2 of data[2:3])
     raw = (data[2] << 6) | (data[3] >> 2);
     // Convert to Kelvin: 233.15K to 398.15K (-40C to +125C) (scale factor = 165.0 / 16383.0)
@@ -93,6 +123,6 @@ void AC_CASS_HYT271::_timer(void)
     // Two-phase measurement cycle:
     // 1. Collect data from previous measurement request
     // 2. Start new measurement for next callback
-    _healthy = _collect(_humidity, _temperature);
+    _healthy = _collect(_humidity, _humidity_corrected, _temperature);
     _measure();
 }

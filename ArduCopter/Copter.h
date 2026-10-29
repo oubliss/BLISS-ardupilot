@@ -1014,6 +1014,7 @@ private:
     // BLISS Libraries sensor code initilizer
     void init_CASS_imet(void);
     void init_CASS_hyt271(void);
+    void update_CASS_iT(void);
 
 #if MODE_ACRO_ENABLED
 #if FRAME_CONFIG == HELI_FRAME

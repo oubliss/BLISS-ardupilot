@@ -126,17 +126,23 @@ public:
 
     bool init(uint8_t busId, uint8_t i2cAddr);  // Initialize sensor on I2C bus
     float relative_humidity(void) { return _humidity; }  // Returns humidity in % (0-100)
+    float corrected_humidity(void) { return _humidity_corrected; }  // poly22-corrected humidity using iMet temperature, clamped to [0, 100] %
     float temperature(void) { return _temperature; }     // Returns temperature in Kelvin
     bool healthy(void) { return _healthy; }              // Returns true if last reading was valid
     void set_i2c_addr(uint8_t addr);                     // Change I2C address at runtime
+    void set_sensor_coeff(float *k);                     // Load 6 poly22 surface coefficients [p00, p10, p01, p20, p11, p02]
+    void set_iT(float iT);                               // Push iMet average temperature (K) for the corrected-humidity polynomial
 
 private:
     AP_HAL::OwnPtr<AP_HAL::I2CDevice> _dev;  // I2C device handle
     HAL_Semaphore _sem;                       // Semaphore for thread-safe data access
+    float coeff[6];                            // poly22 surface coefficients [p00, p10, p01, p20, p11, p02]
     float _temperature;                       // Cached temperature in Kelvin
     float _humidity;                          // Cached relative humidity in %
+    float _humidity_corrected;                // Cached polynomial-corrected humidity
+    float _iT;                                // Latest iMet average temperature (K) pushed by main thread
     bool _healthy;                            // True if last measurement was valid
     bool _measure(void);                      // Send measurement request to sensor
-    bool _collect(float &hum, float &temp);   // Read and convert sensor data
+    bool _collect(float &hum, float &hum_corr, float &temp);   // Read and convert sensor data
     void _timer(void);                        // Periodic callback at 10Hz
 };

@@ -319,7 +319,7 @@ void Copter::send_cass_hyt271(mavlink_channel_t chan) {
 
     // Send HYT271 humidity
     for(uint8_t i=0; i<4; i++){
-        raw_sensor[i] = copter.CASS_HYT271[i].relative_humidity();
+        raw_sensor[i] = copter.CASS_HYT271[i].corrected_humidity();
     }
     #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
     // Variables simulation for HYT271 humidity sensors

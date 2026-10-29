@@ -24,10 +24,10 @@ void Copter::init_CASS_imet(){
     coeff[2][3] = g2.user_parameters.get_user_senC_c4()*1e-7f;
 
     //IMET temp number none:
-    coeff[3][0] = 9.19528749e-04f;
-    coeff[3][1] = 2.89652159e-04f;
-    coeff[3][2] = -2.78103495e-06f;
-    coeff[3][3] = 2.40523976e-07f;
+    coeff[3][0] = 9.13124668e-04f;
+    coeff[3][1] = 2.91081035e-04f;
+    coeff[3][2] = -2.91641257e-06f;
+    coeff[3][3] = 2.44944559e-07f;
     
     // Initialize and set I2C addresses
     uint8_t deafult_i2cAddr = 0x48;
@@ -43,13 +43,78 @@ void Copter::init_CASS_imet(){
 }
 
 void Copter::init_CASS_hyt271(){
+
+    // 6 poly22 coefficients per sensor: [p00, p10, p01, p20, p11, p02]
+    float coeff[4][6];
+
+    //CS3D RH SENSORS
+    coeff[0][0] = g2.user_parameters.get_user_RHA_c1()*1e-7f;
+    coeff[0][1] = g2.user_parameters.get_user_RHA_c2()*1e-7f;
+    coeff[0][2] = g2.user_parameters.get_user_RHA_c3()*1e-7f;
+    coeff[0][3] = g2.user_parameters.get_user_RHA_c4()*1e-7f;
+    coeff[0][4] = g2.user_parameters.get_user_RHA_c5()*1e-7f;
+    coeff[0][5] = g2.user_parameters.get_user_RHA_c6()*1e-7f;
+
+    coeff[1][0] = g2.user_parameters.get_user_RHB_c1()*1e-7f;
+    coeff[1][1] = g2.user_parameters.get_user_RHB_c2()*1e-7f;
+    coeff[1][2] = g2.user_parameters.get_user_RHB_c3()*1e-7f;
+    coeff[1][3] = g2.user_parameters.get_user_RHB_c4()*1e-7f;
+    coeff[1][4] = g2.user_parameters.get_user_RHB_c5()*1e-7f;
+    coeff[1][5] = g2.user_parameters.get_user_RHB_c6()*1e-7f;
+
+    coeff[2][0] = g2.user_parameters.get_user_RHC_c1()*1e-7f;
+    coeff[2][1] = g2.user_parameters.get_user_RHC_c2()*1e-7f;
+    coeff[2][2] = g2.user_parameters.get_user_RHC_c3()*1e-7f;
+    coeff[2][3] = g2.user_parameters.get_user_RHC_c4()*1e-7f;
+    coeff[2][4] = g2.user_parameters.get_user_RHC_c5()*1e-7f;
+    coeff[2][5] = g2.user_parameters.get_user_RHC_c6()*1e-7f;
+
+    coeff[3][0] = 0;
+    coeff[3][1] = 0;
+    coeff[3][2] = 0;
+    coeff[3][3] = 0;
+    coeff[3][4] = 0;
+    coeff[3][5] = 0;
+
     // Initialize and set I2C addresses
     uint8_t deafult_i2cAddr = 0x10;
     uint8_t busId = 0;
     for(uint8_t i=0; i<4; i++){
         CASS_HYT271[i].init(busId,deafult_i2cAddr + i);
     }
+
+    // Set sensor coefficients
+    CASS_HYT271[0].set_sensor_coeff(coeff[0]);
+    CASS_HYT271[1].set_sensor_coeff(coeff[1]);
+    CASS_HYT271[2].set_sensor_coeff(coeff[2]);
+    CASS_HYT271[3].set_sensor_coeff(coeff[3]);
 }
+
+// Average healthy iMet temperatures (excluding readings below 200 K) and
+// push the result into every HYT271 instance for use in its corrected
+// humidity polynomial. Called at 10 Hz by the scheduler.
+void Copter::update_CASS_iT()
+{
+    float sum = 0.0f;
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < 4; i++) {
+        if (CASS_Imet[i].healthy()) {
+            const float t = CASS_Imet[i].temperature();
+            if (t >= 200.0f) {
+                sum += t;
+                n++;
+            }
+        }
+    }
+    if (n == 0) {
+        return;   // no valid sources — preserve previous _iT in each HYT271
+    }
+    const float avg = sum / n;
+    for (uint8_t i = 0; i < 4; i++) {
+        CASS_HYT271[i].set_iT(avg);
+    }
+}
+
 
 // return barometric altitude in centimeters
 void Copter::read_barometer(void)

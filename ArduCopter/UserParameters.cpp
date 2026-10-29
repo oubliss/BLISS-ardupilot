@@ -40,7 +40,7 @@ const AP_Param::GroupInfo UserParameters::var_info[] = {
     // GPS-based Lidar activation
     AP_GROUPINFO("_LIDAR_ALT", 19, UserParameters, gpslidar_alt, 80.0f),
     AP_GROUPINFO("_LIDAR_HUM", 20, UserParameters, gpslidar_hum, 90.0f),
-    // BLISS sensor coefficients
+    // BLISS temp sensor coefficients
     AP_GROUPINFO("_SEN_A1", 23, UserParameters, _senA_c1, 10104.8989f),
     AP_GROUPINFO("_SEN_A2", 24, UserParameters, _senA_c2, 2620.50421f),
     AP_GROUPINFO("_SEN_A3", 25, UserParameters, _senA_c3, 0.0f),
@@ -53,7 +53,48 @@ const AP_Param::GroupInfo UserParameters::var_info[] = {
     AP_GROUPINFO("_SEN_C2", 32, UserParameters, _senC_c2, 2620.50421f),
     AP_GROUPINFO("_SEN_C3", 33, UserParameters, _senC_c3, 0.0f),
     AP_GROUPINFO("_SEN_C4", 34, UserParameters, _senC_c4, 1.48891207f),
-    
+    // BLISS RH sensor coefficients are nested in sub-groups: the
+    // parent table would otherwise approach AP_Param's 64-entry hard
+    // limit. Each block holds the 6 poly22 coefficients in one entry.
+    // User-visible names are USR_RH_A1..USR_RH_C6.
+    AP_SUBGROUPINFO(_RHA, "_RH_A", 35, UserParameters, RHACoeffs),
+    AP_SUBGROUPINFO(_RHB, "_RH_B", 36, UserParameters, RHBCoeffs),
+    AP_SUBGROUPINFO(_RHC, "_RH_C", 37, UserParameters, RHCCoeffs),
+
+    AP_GROUPEND
+};
+
+// Defaults are the identity transform (scaled by 1e7 to match the *1e-7f
+// reader convention in Copter::init_CASS_hyt271). c2 stores p10 = 1, so
+// an uncalibrated sensor with valid iT returns raw RH unchanged. Push
+// calibration values from SWX_calibration_surface_iT.csv (_x1e7 rows).
+const AP_Param::GroupInfo RHACoeffs::var_info[] = {
+    AP_GROUPINFO("1", 0, RHACoeffs, c1, 0.0f),         // p00
+    AP_GROUPINFO("2", 1, RHACoeffs, c2, 10000000.0f),  // p10 = 1 (identity)
+    AP_GROUPINFO("3", 2, RHACoeffs, c3, 0.0f),         // p01
+    AP_GROUPINFO("4", 3, RHACoeffs, c4, 0.0f),         // p20
+    AP_GROUPINFO("5", 4, RHACoeffs, c5, 0.0f),         // p11
+    AP_GROUPINFO("6", 5, RHACoeffs, c6, 0.0f),         // p02
+    AP_GROUPEND
+};
+
+const AP_Param::GroupInfo RHBCoeffs::var_info[] = {
+    AP_GROUPINFO("1", 0, RHBCoeffs, c1, 0.0f),         // p00
+    AP_GROUPINFO("2", 1, RHBCoeffs, c2, 10000000.0f),  // p10 = 1 (identity)
+    AP_GROUPINFO("3", 2, RHBCoeffs, c3, 0.0f),         // p01
+    AP_GROUPINFO("4", 3, RHBCoeffs, c4, 0.0f),         // p20
+    AP_GROUPINFO("5", 4, RHBCoeffs, c5, 0.0f),         // p11
+    AP_GROUPINFO("6", 5, RHBCoeffs, c6, 0.0f),         // p02
+    AP_GROUPEND
+};
+
+const AP_Param::GroupInfo RHCCoeffs::var_info[] = {
+    AP_GROUPINFO("1", 0, RHCCoeffs, c1, 0.0f),         // p00
+    AP_GROUPINFO("2", 1, RHCCoeffs, c2, 10000000.0f),  // p10 = 1 (identity)
+    AP_GROUPINFO("3", 2, RHCCoeffs, c3, 0.0f),         // p01
+    AP_GROUPINFO("4", 3, RHCCoeffs, c4, 0.0f),         // p20
+    AP_GROUPINFO("5", 4, RHCCoeffs, c5, 0.0f),         // p11
+    AP_GROUPINFO("6", 5, RHCCoeffs, c6, 0.0f),         // p02
     AP_GROUPEND
 };
 
