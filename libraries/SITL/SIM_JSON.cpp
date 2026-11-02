@@ -144,9 +144,9 @@ void JSON::output_servos(const struct sitl_input &input)
     This parser does not do any syntax checking, and is not at all
     general purpose
 */
-uint32_t JSON::parse_sensors(const char *json)
+uint64_t JSON::parse_sensors(const char *json)
 {
-    uint32_t received_bitmask = 0;
+    uint64_t received_bitmask = 0;
 
 #if SITL_JSON_DEBUG && AP_FILESYSTEM_FILE_WRITING_ENABLED
     // it is useful in some environments to be able to get a copy of the raw
@@ -191,7 +191,7 @@ uint32_t JSON::parse_sensors(const char *json)
         }
 
         // record the keys that are found
-        received_bitmask |= 1U << i;
+        received_bitmask |= 1ULL << i;
 
         p += strlen(key.key)+2;
         switch (key.type) {
@@ -294,7 +294,7 @@ void JSON::recv_fdm(const struct sitl_input &input)
         return;
     }
 
-    const uint32_t received_bitmask = parse_sensors((const char *)(p1+1));
+    const uint64_t received_bitmask = parse_sensors((const char *)(p1+1));
     if (received_bitmask == 0) {
         // did not receive one of the mandatory fields
         printf("Did not contain all mandatory fields\n");
@@ -312,7 +312,7 @@ void JSON::recv_fdm(const struct sitl_input &input)
         printf("\nJSON received:\n");
         for (uint16_t i=0; i<ARRAY_SIZE(keytable); i++) {
             struct keytable &key = keytable[i];
-            if ((received_bitmask &  1U << i) == 0) {
+            if ((received_bitmask &  1ULL << i) == 0) {
                 continue;
             }
             if (strcmp(key.section, "") == 0) {
@@ -383,7 +383,7 @@ void JSON::recv_fdm(const struct sitl_input &input)
 
     // update range finder distances
     for (uint8_t i=7; i<13; i++) {
-        if ((received_bitmask &  1U << i) == 0) {
+        if ((received_bitmask &  1ULL << i) == 0) {
             continue;
         }
         rangefinder_m[i-7] = state.rng[i-7];
@@ -414,6 +414,14 @@ void JSON::recv_fdm(const struct sitl_input &input)
     }
     if ((received_bitmask & BAT_AMP) != 0) {
         battery_current = state.bat_amp; 
+    }
+
+    // update ambient air
+    ambient.valid = (received_bitmask & (ATM_TEMP | ATM_HUM)) == (ATM_TEMP | ATM_HUM);
+    if (ambient.valid) {
+        ambient.temperature = state.atmosphere.temperature;
+        ambient.humidity = state.atmosphere.humidity;
+        ambient.pressure = (received_bitmask & ATM_PRESS) != 0 ? state.atmosphere.pressure : 0;
     }
 
     double deltat;
@@ -514,6 +522,9 @@ void JSON::update(const struct sitl_input &input)
 
     // receive from JSON model
     recv_fdm(input);
+
+    // update the simulated i2c devices, e.g. the CopterSonde sensors that read the ambient air
+    update_i2c();
 
     // update magnetic field
     // as the model does not provide mag feild we calculate it from position and attitude

@@ -1061,6 +1061,14 @@ bool Aircraft::Clamp::clamped(Aircraft &aircraft, const struct sitl_input &input
     return currently_clamped;
 }
 
+// update the simulated i2c devices
+void Aircraft::update_i2c()
+{
+    if (i2c) {
+        i2c->update(*this);
+    }
+}
+
 void Aircraft::update_external_payload(const struct sitl_input &input)
 {
     external_payload_mass = 0;
@@ -1081,10 +1089,7 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
         }
     }
 
-    // update i2c
-    if (i2c) {
-        i2c->update(*this);
-    }
+    update_i2c();
 
     // update buzzer
     if (buzzer && buzzer->is_enabled()) {

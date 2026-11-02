@@ -152,6 +152,15 @@ public:
     const Location &get_home() const { return home; }
     float get_home_yaw() const { return home_yaw; }
 
+    // ambient temperature (K), relative humidity (%) and pressure (Pa) at the vehicle, if the
+    // simulator provides them
+    bool get_ambient(float &temperature, float &humidity, float &pressure) const {
+        temperature = ambient.temperature;
+        humidity = ambient.humidity;
+        pressure = ambient.pressure;
+        return ambient.valid;
+    }
+
     void set_buzzer(Buzzer *_buzzer) { buzzer = _buzzer; }
     void set_sprayer(Sprayer *_sprayer) { sprayer = _sprayer; }
     void set_parachute(Parachute *_parachute) { parachute = _parachute; }
@@ -235,6 +244,14 @@ protected:
         float speed;
         float direction;
     } wind_vane_apparent;
+
+    // ambient air at the vehicle, from simulators that model the atmosphere (JSON "atmosphere")
+    struct {
+        float temperature;  // K
+        float humidity;     // relative humidity, %
+        float pressure;     // Pa, 0 if not provided
+        bool valid;
+    } ambient {};
 
     // Wind Turbulence simulated Data
     float turbulence_azimuth;
@@ -329,6 +346,7 @@ protected:
 
     // update external payload/sensor dynamic
     void update_external_payload(const struct sitl_input &input);
+    void update_i2c();
 
     void add_shove_forces(Vector3f &rot_accel, Vector3f &body_accel);
     void add_twist_forces(Vector3f &rot_accel);
