@@ -928,6 +928,20 @@ const AP_Param::GroupInfo SIM::var_gps[] = {
     // @Values: 0:Disabled, 1:Enabled
     AP_GROUPINFO("GPS2_JAM",      49, SIM,  gps_jam[1], 0),
 
+    // @Param: GPS_RTK
+    // @DisplayName: GPS 1 RTK from injected corrections
+    // @Description: With 0 the simulated GPS 1 always reports an exact RTK fixed position. With 1 it is RTK only while the autopilot injects RTCM3 corrections (GPS_RTCM_DATA): standalone 3D fix with about 1 m of slowly wandering error without them, RTK float a few seconds after they start, then RTK fixed with centimetre error. GPS_ACC is then unused. u-blox (GPS_TYPE 1) only.
+    // @User: Advanced
+    // @Values: 0:Always RTK fixed, 1:RTK from injected corrections
+    AP_GROUPINFO("GPS_RTK",       50, SIM,  gps_rtk[0], 0),
+
+    // @Param: GPS2_RTK
+    // @DisplayName: GPS 2 RTK from injected corrections
+    // @Description: As GPS_RTK, for GPS 2
+    // @User: Advanced
+    // @Values: 0:Always RTK fixed, 1:RTK from injected corrections
+    AP_GROUPINFO("GPS2_RTK",      51, SIM,  gps_rtk[1], 0),
+
     AP_GROUPEND
 };
 #endif  // HAL_SIM_GPS_ENABLED

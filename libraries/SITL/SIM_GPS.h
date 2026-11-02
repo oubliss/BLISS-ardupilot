@@ -28,6 +28,8 @@ param set SERIAL5_PROTOCOL 5
 #if HAL_SIM_GPS_ENABLED
 
 #include <sys/time.h>
+#include <AP_GPS/RTCM3_Parser.h>
+#include <AP_Math/AP_Math.h>
 #include "SIM_SerialDevice.h"
 
 namespace SITL {
@@ -49,6 +51,13 @@ struct GPS_Data {
     float vertical_acc;
     float speed_acc;
     uint8_t num_sats;
+
+    // carrier-phase solution, for the backends that report one
+    enum class RTK : uint8_t {
+        FIXED = 0,  // without SIM_GPS_RTK the simulated GPS is always RTK fixed
+        FLOAT,
+        NONE,
+    } rtk;
 
     // Get course over ground [rad], where 0 = North in WGS-84 coordinate system.
     // Calculated from 2D velocity.
@@ -141,6 +150,9 @@ public:
 
     uint32_t device_baud() const override;  // 0 meaning unset
 
+    // look for RTCM3 corrections in bytes the autopilot sent to the GPS
+    void scan_rtcm(const char *buffer, ssize_t len);
+
 private:
 
     uint8_t instance;
@@ -166,6 +178,17 @@ private:
 
     bool _gps_has_basestation_position;
     GPS_Data _gps_basestation_data;
+
+    // RTK from injected corrections (SIM_GPS_RTK)
+    RTCM3_Parser rtcm_parser;
+    struct {
+        uint32_t last_msm_ms;       // last observation message (MSM)
+        uint32_t last_arp_ms;       // last base position message (1005/1006)
+        uint32_t stream_start_ms;   // when the current correction stream started
+        uint32_t last_update_ms;
+        Vector3f standalone_error;  // NED, m
+    } rtk;
+    void simulate_rtk(GPS_Data &d, uint32_t now_ms);
 
     void simulate_jamming(GPS_Data &d);
 

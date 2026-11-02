@@ -52,7 +52,9 @@ ssize_t GPS_Backend::write_to_autopilot(const char *p, size_t size) const
 
 ssize_t GPS_Backend::read_from_autopilot(char *buffer, size_t size) const
 {
-    return front.read_from_autopilot(buffer, size);
+    const ssize_t ret = front.read_from_autopilot(buffer, size);
+    front.scan_rtcm(buffer, ret);
+    return ret;
 }
 
 GPS::GPS(uint8_t _instance) :
@@ -416,6 +418,10 @@ void GPS::update()
         d.speedD += velRelOffsetEF.z;
     }
 
+    if (_sitl->gps_rtk[idx]) {
+        simulate_rtk(d, now_ms);
+    }
+
     // get delayed data
     d.timestamp_ms = now_ms;
     d = interpolate_data(d, _sitl->gps_delay_ms[instance]);
@@ -436,9 +442,84 @@ void GPS::update()
 
 void GPS_Backend::update_read()
 {
-    // swallow any config bytes
-    char c;
-    read_from_autopilot(&c, 1);
+    // swallow any config bytes, fast enough for injected RTCM corrections
+    char buf[64];
+    read_from_autopilot(buf, sizeof(buf));
+}
+
+void GPS::scan_rtcm(const char *buffer, ssize_t len)
+{
+    for (ssize_t i=0; i<len; i++) {
+        if (!rtcm_parser.read(uint8_t(buffer[i]))) {
+            continue;
+        }
+        const uint16_t id = rtcm_parser.get_id();
+        const uint32_t now_ms = AP_HAL::millis();
+        if (id == 1005 || id == 1006) {
+            rtk.last_arp_ms = now_ms;
+        } else if (id >= 1071 && id <= 1137) {
+            if (rtk.last_msm_ms == 0 || now_ms - rtk.last_msm_ms > 30000) {
+                rtk.stream_start_ms = now_ms;
+            }
+            rtk.last_msm_ms = now_ms;
+        }
+    }
+}
+
+/*
+  RTK only while corrections arrive (SIM_GPS_RTK). Without them the
+  position has a slowly wandering error like a standalone u-blox F9P
+  (about 1 m); with them it goes RTK float, then RTK fixed (about 1 cm).
+ */
+void GPS::simulate_rtk(GPS_Data &d, uint32_t now_ms)
+{
+    // standalone error: first-order Gauss-Markov process per axis
+    const float sigma_h = 1.0f, sigma_v = 1.5f, tau_s = 60.0f;
+    const float dt = MIN((now_ms - rtk.last_update_ms) * 0.001f, 1.0f);
+    rtk.last_update_ms = now_ms;
+    const float a = expf(-dt / tau_s);
+    // rand_float() is uniform in [-1,1], variance 1/3
+    const float b = sqrtf(3 * (1 - a*a));
+    Vector3f &e = rtk.standalone_error;
+    e.x = a*e.x + sigma_h * b * rand_float();
+    e.y = a*e.y + sigma_h * b * rand_float();
+    e.z = a*e.z + sigma_v * b * rand_float();
+
+    // a rover needs the observations (MSM) and the base position (1005/1006)
+    const uint32_t age_ms = now_ms - rtk.last_msm_ms;
+    const uint32_t stream_ms = now_ms - rtk.stream_start_ms;
+    const bool corrections = rtk.last_msm_ms != 0 && rtk.last_arp_ms != 0 && age_ms < 30000;
+    if (!corrections || stream_ms < 2000) {
+        d.rtk = GPS_Data::RTK::NONE;
+    } else if (age_ms > 5000 || stream_ms < 10000) {
+        d.rtk = GPS_Data::RTK::FLOAT;
+    } else {
+        d.rtk = GPS_Data::RTK::FIXED;
+    }
+
+    Vector3f error;
+    switch (d.rtk) {
+    case GPS_Data::RTK::NONE:
+        error = e;
+        d.horizontal_acc = 1.5f;
+        d.vertical_acc = 2.5f;
+        break;
+    case GPS_Data::RTK::FLOAT:
+        error = e * 0.15f;
+        d.horizontal_acc = 0.25f;
+        d.vertical_acc = 0.4f;
+        break;
+    case GPS_Data::RTK::FIXED:
+        error = Vector3f(rand_float(), rand_float(), 1.5f * rand_float()) * 0.01f;
+        d.horizontal_acc = 0.014f;
+        d.vertical_acc = 0.02f;
+        break;
+    }
+
+    double const earth_rad_inv = 1.569612305760477e-7; // use Authalic/Volumetric radius
+    d.latitude += degrees(error.x * earth_rad_inv);
+    d.longitude += degrees(error.y * earth_rad_inv / cos(radians(d.latitude)));
+    d.altitude -= error.z;
 }
 
 /*

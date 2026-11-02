@@ -213,6 +213,7 @@ public:
     AP_Float gps_accuracy[2];
     AP_Vector3f gps_vel_err[2]; // Velocity error offsets in NED (x = N, y = E, z = D)
     AP_Int8 gps_jam[2]; // jamming simulation enable
+    AP_Int8 gps_rtk[2]; // RTK only with injected RTCM corrections
 
     // initial offset on GPS lat/lon, used to shift origin
     AP_Float gps_init_lat_ofs;

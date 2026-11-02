@@ -246,7 +246,17 @@ void GPS_UBlox::publish(const GPS_Data *d)
     pvt.t_acc = 0;
     pvt.nano = 0;
     pvt.fix_type = d->have_lock? 0x3 : 0;
-    pvt.flags = 0b10000011; // carrsoln=fixed, psm = na, diffsoln and fixok
+    switch (d->rtk) {
+    case GPS_Data::RTK::FIXED:
+        pvt.flags = 0b10000011; // carrsoln=fixed, psm = na, diffsoln and fixok
+        break;
+    case GPS_Data::RTK::FLOAT:
+        pvt.flags = 0b01000011; // carrsoln=float, psm = na, diffsoln and fixok
+        break;
+    case GPS_Data::RTK::NONE:
+        pvt.flags = 0b00000001; // fixok
+        break;
+    }
     pvt.flags2 =0;
     pvt.num_sv = d->have_lock ? d->num_sats : 3;
     pvt.lon = d->longitude * 1.0e7;
