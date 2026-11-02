@@ -13,6 +13,7 @@ The IMET, RHUM and WIND logs, CASS_SENSOR_RAW and LAAIRS all work as on the real
 | World, vehicle model, atmosphere table, SITL parameters, tools | this folder (my-ardupilot `ArduPilot-4.6-CS-gazebo`) |
 | SITL sensor simulators, JSON `atmosphere` fields | `libraries/SITL/SIM_CASS.*`, `SIM_JSON.*` |
 | `CopterSondePlugin` (air, wind force, battery), `ArduPilotPlugin` `<json_extra_topic>` | ardupilot_gazebo `main-CopterSonde` |
+| Skycharge digital twin, BOLOGNINI S1 pad and launch deck | `skycharge/`, `models/cs_*pad*`, `models/cs_skycharge_bolognini` (see [Skycharge charging pad](#skycharge-charging-pad)) |
 
 ## Run
 
@@ -138,6 +139,95 @@ A 10 000 ft AutoVP profile at 09:00 (`--alt 3048 --param USR_VPBATT_EN=0`, 5 m/s
 | Wind-vane direction | −0.4 / 0.9° | +0.4 / 0.9° |
 
 The sensors lag as the real ones do: warm and dry going up through air that cools and moistens with height. The wind-vane speed reads low by up to 23 % at 3 km, where the air is about 25 % thinner, so the same wind tilts the vehicle less. The real estimator has no density correction either. Attitude stays steady through the whole profile, at 0.3–0.4 °/s rate spread on roll and pitch. With `USR_VPBATT_EN 1` the VP battery monitor sends the vehicle home at about 2.7 km.
+
+## Skycharge charging pad
+
+The CopterSonde starts on the launch deck at the take-off point, resting on a Skycharge BOLOGNINI S1 charging pad. As in the field, the pad charges it after landing, and LAAIRS runs the charging. The pad has three parts in the simulator:
+
+| Part | What it is | Where |
+|---|---|---|
+| Pad and deck | The 1.5 m deck (`cs_launch_pad`), the S1 with its 6 × 6 steel tiles and the charge source box (`cs_skycharge_bolognini`). The geometry is estimated from Skycharge's photos and specifications. | `models/`, from `tools/make_pad_models.py` |
+| Contact unit and battery | `CopterSondePlugin` `<skycharge>`. It checks whether the contact block under the body touches the tiles. When it does and the PSU is on, it charges the battery. | ardupilot_gazebo `main-CopterSonde` |
+| Charge source (digital twin) | The pad's electronics and software: the MUX HW2 state machine, meters and parameters, `skycharged`, `skycharge-cli` over SSH, and the JSON API. | `skycharge/skycharge_twin` |
+
+### The twin is a black box with the pad's interfaces
+
+It reproduces what the open Skycharge SDK ([libskycharge](https://github.com/Skycharge/libskycharge) v2.2.2, `skyclient.c`) and [support.skycharge.de](https://support.skycharge.de/docs/tool) document:
+
+- **SSH:** like the pad's BeagleBone, it takes `root` with the vendor key only (password login is off). It also takes only SHA-1 `ssh-rsa` signatures, which is why LAAIRS pins paramiko below 5.
+- **`skycharge-cli`:** every command, with the same text in plain, `--no-pretty` and `--json` output, and the same exit status (255 for errors).
+  - It rejects bad input the same way. For example, `batt-type` knows only `Li-Po` and `Li-Ion`.
+  - Commands do nothing in the wrong state: `sink-start-charge` acts only in `CHARGING_FINISHED`, `sink-stop-charge` only while charging, `resume-scan` only when stopped.
+- **States:** `SCANNING` → `LINK_ESTABLISHED` → `PRECHARGE_DELAYED` → `PRECHARGING` (ramp) → `CHARGING` → `CHARGING_FINISHED` with its reason.
+  - Losing the drone gives `ERR_BAD_LINK` (the normal end of a session), then scanning again after `error-indication-timeout-secs`.
+  - A finished charge restarts after `repeat-charge-after-mins`.
+- **`skycharge.conf`:** runtime parameter changes are lost on a power cycle, because `skycharged` reloads `skycharge.conf` when it starts.
+- **JSON API:** the cloud `/v1/...` requests (`charging-state`, `sink-charging-params`, `scan-stop`, ...), with `user-uuid`/`device-uuid` checks.
+- **Twin-only control (`skytwin`, over the same SSH):**
+  - Bench mode: place or remove the drone, and set the battery.
+  - Faults: `short-circuit`, `low-mux-voltage`, `voltage-on-output`, `mux-overtemp`, `contact-bounce`.
+  - `power-cycle`: the pad stops answering for 45 s, then comes back with its `skycharge.conf` values.
+
+### Electrical model
+
+The PSU holds the charge voltage V (`batt-max-voltage-mv`) and limits the current to I_lim (the precharge ramp, then `charging-max-current-ma`). The pack has open-circuit voltage OCV and resistance R. The tiles, contacts and sink add R_path. The drone draws I_load on the pad. The current is then
+
+    I = clamp((V - OCV + R·I_load) / (R_path + R), 0, I_lim)
+
+The charge current goes into the cells but not through the power module. So SITL, and LAAIRS through MAVLink, see the pack voltage rise while the current stays at I_load, as on the real CopterSonde. The pad meters the total current, so it can only reach its cutoff (`cutoff-min-current-ma`) if the drone draws less than that while disarmed.
+
+`idle_current` is 0.2 A. The CSWX logs show 0.11–0.21 A after disarm (`BAT.Curr`). At the earlier 0.8 A, above the 500 mA cutoff, the pad would never report full and would stop only at its time limit. `hover_current` went from 20 to 20.6 A, so the flight currents stay as fitted (21.5 A hover, 28.3 A climb, 15.6 A descent at 5 m/s).
+
+### Run
+
+```bash
+# Gazebo and SITL as usual, then the twin in a third terminal:
+~/Github/my-ardupilot-CS/CopterSonde-sim/tools/skycharge_twin.sh --gazebo
+```
+
+In LAAIRS, choose **Digital twin (simulator)** in the Skycharge console (View → Toggle Skycharge Console). The console connects to `127.0.0.1:2222`, which WSL forwards from Windows. Alternatively, tick "Use Skycharge charging pad" in the site-arrival checklist. Then:
+
+- **Charging:** the drone charges on the pad while disarmed, and arming is blocked until the battery is full or the operator skips.
+- **Take-off:** arming suspends the pad.
+- **Landing:** the pad charges again once the post-flight checklist is acknowledged.
+
+By hand:
+
+```bash
+ssh -i id_rsa.skydevice -p 2222 -o PubkeyAcceptedAlgorithms=+ssh-rsa root@127.0.0.1 skycharge-cli monitor --pretty
+```
+
+Without `--gazebo`, a battery inside the twin is the plant (bench mode): `skytwin place`, `skytwin battery 0.3`.
+
+Two environment variables for `coptersonde_gazebo.sh` set the pack for charging tests:
+
+- `CS_BATTERY_SOC=0.5` starts at half charge.
+- `CS_BATTERY_AH=1` uses a 1 Ah pack. A 9 Ah pack takes about 45 min of constant-voltage taper to reach the 500 mA cutoff.
+
+Gazebo topics are shared between Gazebo instances. Give a second simulator its own `GZ_PARTITION`, and run the twin in the same one.
+
+### Tests
+
+```bash
+python3 -m pytest CopterSonde-sim/tests/test_skycharge_twin.py
+```
+
+These cover:
+
+- the CLI against the SDK's formats and errors;
+- the state machine and its timers on a simulated clock;
+- the electrical model;
+- SSH, including that SHA-2-only clients (paramiko 5) are refused;
+- `monitor` streaming;
+- the JSON API;
+- the power cycle.
+
+`tools/skycharge_e2e.py` runs the whole chain: SITL + Gazebo + the twin + LAAIRS's own Skycharge manager, which it imports from a BLISS-GCS checkout and runs with LAAIRS's Python. Its four phases:
+
+1. On the pad at start-up: the pad charges and LAAIRS blocks arming.
+2. The operator skips the charge: the pad ends with `CHARGING_FORCIBLY_STOPPED`, and LAAIRS must not call that full.
+3. Take-off, hover and RTL back onto the pad.
+4. After the post-flight checklist, a charge to the current cutoff.
 
 ## Compare a flight with the truth
 

@@ -12,6 +12,34 @@
       <uri>model://iris_with_standoffs</uri>
     </include>
 
+    <!-- Skycharge BOLOGNINI S1 contact unit under the body: spring-loaded contacts (appearance only) -->
+    <link name="skycharge_contact_unit">
+      <pose>0 0 -0.183 0 0 0</pose>
+      <inertial>
+        <mass>0.001</mass>
+        <inertia><ixx>1e-7</ixx><iyy>1e-7</iyy><izz>1e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <visual name="mount">
+        <pose>0 0 0.04 0 0 0</pose>
+        <geometry><cylinder><radius>0.006</radius><length>0.08</length></cylinder></geometry>
+        <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material>
+      </visual>
+      <visual name="block">
+        <geometry><box><size>0.06 0.04 0.012</size></box></geometry>
+        <material><ambient>0.08 0.08 0.08 1</ambient><diffuse>0.08 0.08 0.08 1</diffuse></material>
+      </visual>
+      <visual name="contacts">
+        <pose>0 0 -0.009 0 0 0</pose>
+        <geometry><box><size>0.05 0.03 0.006</size></box></geometry>
+        <material><ambient>0.85 0.65 0.2 1</ambient><diffuse>0.85 0.65 0.2 1</diffuse>
+          <specular>0.8 0.7 0.4 1</specular></material>
+      </visual>
+    </link>
+    <joint name="skycharge_contact_unit_joint" type="fixed">
+      <parent>iris_with_standoffs::base_link</parent>
+      <child>skycharge_contact_unit</child>
+    </joint>
+
     <!-- sensor scoop at the nose (appearance only) -->
     <link name="sensor_scoop">
       <pose>0.16 0 0.215 0 0 0</pose>
@@ -192,12 +220,29 @@
       <battery_cells>6</battery_cells>
       <battery_capacity>9.0</battery_capacity>
       <battery_resistance>0.03</battery_resistance>
-      <hover_current>20</hover_current>
+      <!-- 20.6 A over the 0.2 A idle keeps the totals fitted with 0.8 A idle (20 A) -->
+      <hover_current>20.6</hover_current>
       <hover_rotor_speed>450</hover_rotor_speed>
       <hover_induced_velocity>8.0</hover_induced_velocity>
       <profile_power>0.3</profile_power>
-      <idle_current>0.8</idle_current>
+      <!-- disarmed CS on the ground: 0.11-0.21 A in the CSWX logs (BAT.Curr after disarm) -->
+      <idle_current>0.2</idle_current>
       <publish_rate>100</publish_rate>
+      <!--
+        Skycharge charge sink and BOLOGNINI S1 contact unit: the contact block hangs under the body
+        and touches the tiles when the CopterSonde rests on the pad. The charger's electronics are
+        the Skycharge digital twin (CopterSonde-sim/skycharge), which drives the PSU over these topics.
+      -->
+      <skycharge>
+        <pad_model>skycharge_bolognini</pad_model>
+        <pad_half_size>0.29</pad_half_size>
+        <pad_surface_height>0.12</pad_surface_height>
+        <contact_offset>0 0 -0.195</contact_offset>
+        <contact_travel>0.012</contact_travel>
+        <path_resistance>0.08</path_resistance>
+        <command_topic>/skycharge/psu</command_topic>
+        <sense_topic>/skycharge/sink</sense_topic>
+      </skycharge>
     </plugin>
 
   </model>

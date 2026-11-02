@@ -2,5 +2,7 @@
 models/cs_norman_buildings/
 models/cs_norman_ground/
 models/cs_norman_trees/
+models/cs_launch_pad/
+models/cs_skycharge_bolognini/
 worlds/norman_coptersonde.sdf
 __pycache__/
