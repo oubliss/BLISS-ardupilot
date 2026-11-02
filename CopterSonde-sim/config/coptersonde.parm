@@ -1,0 +1,110 @@
+# CopterSonde SITL defaults for the Gazebo world (on top of copter.parm and gazebo-iris.parm).
+# CopterSonde values from the CS3D on the CSWX flights (log 00000080, 2026-09-25). The attitude
+# tuning, notch filter, motor and servo outputs stay those of the Gazebo Iris, which is the airframe
+# being simulated (FRAME_TYPE 1; the real CS3D uses FRAME_TYPE 18 and SERVO9-12).
+
+# iMet bead thermistor calibrations (Steinhart-Hart x 1e7) and sensor IDs. The simulated beads
+# use whatever USR_SEN_* is loaded, so these only matter for matching the real vehicle.
+USR_SENSOR1     102431
+USR_SENSOR2     102433
+USR_SENSOR3     94159
+USR_SENSOR4     0
+USR_SENSOR5     52
+USR_SENSOR6     53
+USR_SENSOR7     54
+USR_SENSOR8     0
+USR_SEN_A1      9654.345703125
+USR_SEN_A2      2752.9208984375
+USR_SEN_A3      -14.458854675292969
+USR_SEN_A4      1.979047417640686
+USR_SEN_B1      9643.5029296875
+USR_SEN_B2      2764.140869140625
+USR_SEN_B3      -15.489397048950195
+USR_SEN_B4      2.015359878540039
+USR_SEN_C1      8815.9111328125
+USR_SEN_C2      2977.98095703125
+USR_SEN_C3      -33.857337951660156
+USR_SEN_C4      2.532552480697632
+
+# HYT271 poly22 humidity corrections (x 1e7). The simulated HYT271s invert them, so the
+# corrected humidity matches the simulated air.
+USR_RH_A1       399204192
+USR_RH_A2       19763636
+USR_RH_A3       -1032806.9375
+USR_RH_A4       -11972.9345703125
+USR_RH_A5       -24555.80078125
+USR_RH_A6       -987.3610229492188
+USR_RH_B1       1298119424
+USR_RH_B2       18335634
+USR_RH_B3       -6745330.5
+USR_RH_B4       -17919.87109375
+USR_RH_B5       -18049.11328125
+USR_RH_B6       8056.6328125
+USR_RH_C1       -6146736640
+USR_RH_C2       15954423
+USR_RH_C3       40071804
+USR_RH_C4       -224.25833129882812
+USR_RH_C5       -13015.037109375
+USR_RH_C6       -65462.3671875
+
+# wind vane: the coptersonde Gazebo model tilts by this calibration (wind_vane_a/_b)
+USR_WV_WSA      39.3
+USR_WV_WSB      2.1
+USR_WV_CUTOFF   0.05
+USR_WV_FS       10
+USR_WV_OFFSET   0
+USR_WV_RTLEN    1
+USR_WV_SPDTOL   28
+WP_YAW_BEHAVIOR 4
+
+# vertical-profile battery monitor, failsafes and AutoVP (RC7, CH7_OPT 47)
+USR_VPBATT_EN   1
+USR_VPBATT_RES  25
+USR_VPBATT_WH   190
+USR_MAX_CURR    100
+USR_CURR_TOUT   5
+USR_AUTOVP_ALT  2438
+USR_LIDAR_ALT   40
+USR_LIDAR_HUM   90
+RC7_OPTION      47
+AUTO_OPTIONS    6
+
+# 6S 9 Ah battery (the Gazebo model sends its voltage and current)
+BATT_MONITOR    4
+BATT_CAPACITY   9000
+BATT_ARM_VOLT   23.3
+BATT_LOW_VOLT   18.6
+BATT_CRT_VOLT   18.0
+BATT_LOW_TIMER  10
+BATT_FS_LOW_ACT 1
+BATT_FS_CRT_ACT 1
+
+# Gazebo Iris roll rate gains: its roll inertia is half its pitch inertia, and with the default
+# gains roll oscillates in hover and diverges in a 5 m/s descent (the stock Iris does the same)
+ATC_RAT_RLL_P   0.07
+ATC_RAT_RLL_I   0.07
+ATC_RAT_RLL_D   0.0018
+
+# the CopterSonde has no precision landing; RC8 as on the CS3D (gazebo-iris.parm sets both)
+PLND_ENABLED    0
+RC8_OPTION      30
+
+# navigation and limits
+WPNAV_SPEED     500
+WPNAV_SPEED_UP  500
+WPNAV_SPEED_DN  500
+WPNAV_ACCEL     250
+WPNAV_ACCEL_Z   65
+WPNAV_RADIUS    200
+PILOT_SPEED_UP  500
+PILOT_SPEED_DN  500
+PILOT_ACCEL_Z   250
+ANGLE_MAX       5500
+RTL_ALT         3000
+LAND_SPEED      50
+FENCE_ENABLE    1
+FENCE_TYPE      7
+FENCE_ACTION    3
+FENCE_ALT_MAX   3048
+FENCE_RADIUS    500
+FENCE_MARGIN    5
