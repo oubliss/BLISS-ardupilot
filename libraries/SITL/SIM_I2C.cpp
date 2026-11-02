@@ -37,6 +37,7 @@
 #include "SIM_MS5525.h"
 #include "SIM_MS5611.h"
 #include "SIM_QMC5883L.h"
+#include "SIM_CASS.h"
 
 #include <signal.h>
 
@@ -85,6 +86,11 @@ static IS31FL3195 is31fl3195;
 #if AP_SIM_COMPASS_QMC5883L_ENABLED
 static QMC5883L qmc5883l;
 #endif
+#if AP_SIM_CASS_ENABLED
+// CopterSonde: three iMet beads and three HYT271 (USR_SENSOR4 and USR_SENSOR8 are 0)
+static CASS_iMet cass_imet[] { 0, 1, 2 };
+static CASS_HYT271 cass_hyt271[] { 0, 1, 2 };
+#endif
 
 struct i2c_device_at_address {
     uint8_t bus;
@@ -122,6 +128,14 @@ struct i2c_device_at_address {
     { 2, 0x77, ms5611 },        // MS5611: BARO_PROBE_EXT = 2
 #if AP_SIM_COMPASS_QMC5883L_ENABLED
     { 2, 0x0D, qmc5883l },
+#endif
+#if AP_SIM_CASS_ENABLED
+    { 0, 0x48, cass_imet[0] },     // AC_CASS_IMET, ADS1115
+    { 0, 0x49, cass_imet[1] },
+    { 0, 0x4A, cass_imet[2] },
+    { 0, 0x10, cass_hyt271[0] },   // AC_CASS_HYT271
+    { 0, 0x11, cass_hyt271[1] },
+    { 0, 0x12, cass_hyt271[2] },
 #endif
 };
 
