@@ -8,6 +8,8 @@ The CopterSonde flies over the Norman, OK radar-site world through air with a re
 
 The IMET, RHUM and WIND logs, CASS_SENSOR_RAW and LAAIRS all work as on the real CopterSonde.
 
+New to the simulator? [CopterSonde_Simulator_Manual.docx](CopterSonde_Simulator_Manual.docx) walks through installing WSL, Ubuntu, Gazebo and LAAIRS, cloning the oubliss repositories, and flying a profile with charging and RTK.
+
 | Part | Where |
 |---|---|
 | World, vehicle model, atmosphere table, SITL parameters, tools | this folder (my-ardupilot `ArduPilot-4.6-CS-gazebo`) |
