@@ -14,6 +14,7 @@ The IMET, RHUM and WIND logs, CASS_SENSOR_RAW and LAAIRS all work as on the real
 | SITL sensor simulators, JSON `atmosphere` fields | `libraries/SITL/SIM_CASS.*`, `SIM_JSON.*` |
 | `CopterSondePlugin` (air, wind force, battery), `ArduPilotPlugin` `<json_extra_topic>` | ardupilot_gazebo `main-CopterSonde` |
 | Skycharge digital twin, BOLOGNINI S1 pad and launch deck | `skycharge/`, `models/cs_*pad*`, `models/cs_skycharge_bolognini` (see [Skycharge charging pad](#skycharge-charging-pad)) |
+| RTK base station twin; GPS that is RTK only with injected corrections | `rtk_base/`, `libraries/SITL/SIM_GPS.*` `SIM_GPS_RTK` (see [RTK base station](#rtk-base-station)) |
 
 ## Run
 
@@ -229,6 +230,25 @@ These cover:
 2. The operator skips the charge: the pad ends with `CHARGING_FORCIBLY_STOPPED`, and LAAIRS must not call that full.
 3. Take-off, hover and RTL back onto the pad.
 4. After the post-flight checklist, a charge to the current cutoff.
+
+## RTK base station
+
+In the field, LAAIRS's RTK Injection window drives a u-blox F9P base on a COM port. It surveys the base in, then injects the base's RTCM3 corrections into the drone with `GPS_RTCM_DATA`. The drone's GPS turns RTK FIXED, and with Skycharge on, LAAIRS requires RTK FIXED to take off and land on the pad ("RTK precision landing"). The simulator has both ends:
+
+| Part | What it does |
+|---|---|
+| RTK base twin (`rtk_base/rtk_base_twin`, `tools/rtk_base_twin.sh`) | A ZED-F9P on `socket://127.0.0.1:3101`, which LAAIRS opens like a serial port. It answers the baud probe (MON-VER), takes LAAIRS's CFG-VALSET (message rates, measurement rate, Survey-In or a fixed position), surveys in and sends NAV-PVT, NAV-SVIN and RTCM 1005, MSM4 (GPS, GLONASS, Galileo, BeiDou) and 1230. The base stands 12 m east and 3 m south of the take-off point. |
+| GPS in SITL (`SIM_GPS_RTK 1` in `config/coptersonde.parm`) | RTK only while RTCM arrives. Without it, a standalone 3D fix whose position wanders by about 1 m (1.5 m reported accuracy). Corrections with a base position (1005) give RTK float after 2 s and RTK FIXED after 10 s, at about 1 cm. When they stop, the fix stays fixed for 5 s and float until 30 s, then goes back to 3D. `SIM_GPS_RTK 0`, the default elsewhere, keeps SITL's exact, always-fixed GPS. |
+
+Survey-in follows the F9P: the mean position's accuracy is 2.5 m × √(30 s / (t + 30 s)), so LAAIRS's minimum of 60 s at 2.0 m completes at 60 s (1.44 m).
+
+In LAAIRS, open the RTK Injection window, choose **socket://127.0.0.1:3101 - Digital twin (simulator)** as the port, connect, and start Survey-In. RTCM streams once the survey completes, about 60 s later, and the drone reports RTK FIXED about 10 s after that.
+
+```bash
+python3 -m pytest CopterSonde-sim/tests/test_rtk_base_twin.py   # needs pyubx2, pyrtcm and pyserial, as LAAIRS
+```
+
+The tests decode everything the twin sends with pyubx2 and pyrtcm, LAAIRS's decoders. They run the survey-in on a simulated clock, check fixed-position mode, and drive the twin through a `socket://` serial URL as LAAIRS does.
 
 ## Compare a flight with the truth
 
