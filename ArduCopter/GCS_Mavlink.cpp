@@ -261,24 +261,6 @@ void Copter::send_cass_imet(mavlink_channel_t chan) {
     for(uint8_t i=0; i<4; i++){
         raw_sensor[i] = copter.CASS_Imet[i].temperature();
     }
-    #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-    // Variables simulation for IMET sensors
-        float alt; float simT;
-        copter.ahrs.get_relative_position_D_home(alt);
-        alt = -1*alt;  
-        if(alt < 900){
-            simT = 2.99e-11f*powf(alt,4) - 3.70454e-8*powf(alt,3) - 3.86806e-6*powf(alt,2) + 1.388511e-2*alt + 287.66;
-        }
-        else{
-            simT = 289.64f;
-        }
-        uint32_t m = AP_HAL::millis();
-        raw_sensor[0] = simT + sinf(0.001f*float(m)) * 0.002f;
-        raw_sensor[1] = simT + sinf(0.00075f*float(m)) * 0.003f;
-        raw_sensor[2] = simT + sinf(0.00052f*float(m)) * 0.0025f;
-        raw_sensor[3] = simT + sinf(0.00038f*float(m)) * 0.0028f;
-        //printf("Imet temp: %5.2f \n",raw_sensor[0]);
-    #endif 
     // Call Mavlink function and send CASS data
     mavlink_msg_cass_sensor_raw_send(
         chan,
@@ -321,24 +303,6 @@ void Copter::send_cass_hyt271(mavlink_channel_t chan) {
     for(uint8_t i=0; i<4; i++){
         raw_sensor[i] = copter.CASS_HYT271[i].corrected_humidity();
     }
-    #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
-    // Variables simulation for HYT271 humidity sensors
-        float alt; float simH;
-        copter.ahrs.get_relative_position_D_home(alt);
-        alt = -1*alt; 
-        if(alt < 900){
-            simH = -2.44407e-10f*powf(alt,4) + 3.88881064e-7*powf(alt,3) - 1.41943e-4*powf(alt,2) - 2.81895e-2*alt + 51.63;
-        }
-        else{
-            simH = 34.44f;
-        }
-        uint32_t m = AP_HAL::millis();
-        raw_sensor[0] = simH + sinf(0.1f*float(m)) * 0.02f;
-        raw_sensor[1] = simH + sinf(0.1f*float(m)) * 0.03f;
-        raw_sensor[2] = simH + sinf(0.1f*float(m)) * 0.025f;
-        raw_sensor[3] = simH + sinf(0.1f*float(m)) * 0.028f;
-        //printf("HYT271 Humidity: %5.2f \n",raw_sensor[0]);     
-    #endif
     // Call Mavlink function and send CASS data
     mavlink_msg_cass_sensor_raw_send(
         chan,

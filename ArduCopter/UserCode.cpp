@@ -219,7 +219,6 @@ void Copter::user_vpbatt_monitor()
 #ifdef USER_TEMPERATURE_LOOP
 void Copter::user_temperature_logger()
 {
-    #if CONFIG_HAL_BOARD != HAL_BOARD_SITL
     // Read Temperature, Resistance and Health. Write sensors packet into the SD card
     // Temperature Data Logger ///////////////////////////////////////////////////////////////////////////////////////////
     struct log_IMET pkt_temp = {
@@ -239,36 +238,6 @@ void Copter::user_temperature_logger()
         resist3                : copter.CASS_Imet[2].resistance(),
         resist4                : copter.CASS_Imet[3].resistance()
     }; 
-    #else
-        float alt; float simT;
-        copter.ahrs.get_relative_position_D_home(alt);
-        alt = -1*alt;  
-        if(alt < 900){
-            simT = 2.99e-11f*powf(alt,4) - 3.70454e-8*powf(alt,3) - 3.86806e-6*powf(alt,2) + 1.388511e-2*alt + 287.66;
-        }
-        else{
-            simT = 289.64f;
-        }
-        uint32_t m = AP_HAL::millis();
-        // Write simulated sensors packet into the SD card
-        struct log_IMET pkt_temp = {
-            LOG_PACKET_HEADER_INIT(LOG_IMET_MSG),
-            time_stamp             : AP_HAL::micros64(),
-            fan_status             : _fan_status,
-            healthy1               : copter.CASS_Imet[0].healthy(),
-            healthy2               : copter.CASS_Imet[1].healthy(),
-            healthy3               : copter.CASS_Imet[2].healthy(),
-            healthy4               : copter.CASS_Imet[3].healthy(),
-            temperature1           : simT + sinf(0.001f*float(m)) * 0.002f,
-            temperature2           : simT + sinf(0.0007f*float(m)) * 0.003f,
-            temperature3           : simT + sinf(0.0003f*float(m)) * 0.0025f,
-            temperature4           : simT + sinf(0.0005f*float(m)) * 0.0028f,
-            resist1                : -356.9892f*simT + 110935.3763f + sinf(0.001f*float(m)) * 0.002f,
-            resist2                : -356.9892f*simT + 110935.3763f + sinf(0.0007f*float(m)) * 0.003f,
-            resist3                : -356.9892f*simT + 110935.3763f + sinf(0.0003f*float(m)) * 0.0025f,
-            resist4                : -356.9892f*simT + 110935.3763f + sinf(0.0005f*float(m)) * 0.0028f
-        };
-    #endif
     logger.WriteBlock(&pkt_temp, sizeof(pkt_temp));   //Send package to SD card
 }
 #endif
@@ -276,7 +245,6 @@ void Copter::user_temperature_logger()
 #ifdef USER_HUMIDITY_LOOP
 void Copter::user_humidity_logger()
 {
-    #if CONFIG_HAL_BOARD != HAL_BOARD_SITL
         // Read Rel. Humidity, Temperature and Health. Write sensors packet into the SD card
         // Relative Humidity Data Logger ///////////////////////////////////////////////////////////////////////////////////////////
         struct log_RH pkt_RH = {
@@ -295,35 +263,6 @@ void Copter::user_humidity_logger()
             RHtemp3                : copter.CASS_HYT271[2].temperature(),
             RHtemp4                : copter.CASS_HYT271[3].temperature()
         };
-    #else
-        float alt; float simH;
-        copter.ahrs.get_relative_position_D_home(alt);
-        alt = -1*alt; 
-        if(alt < 900){
-            simH = -2.44407e-10f*powf(alt,4) + 3.88881064e-7*powf(alt,3) - 1.41943e-4*powf(alt,2) - 2.81895e-2*alt + 51.63;
-        }
-        else{
-            simH = 34.44f;
-        }
-        uint32_t m = AP_HAL::millis();
-        // Write sensors packet into the SD card
-        struct log_RH pkt_RH = {
-            LOG_PACKET_HEADER_INIT(LOG_RH_MSG),
-            time_stamp             : AP_HAL::micros64(),
-            healthy1               : copter.CASS_HYT271[0].healthy(),
-            healthy2               : copter.CASS_HYT271[1].healthy(),
-            healthy3               : copter.CASS_HYT271[2].healthy(),
-            healthy4               : copter.CASS_HYT271[3].healthy(),
-            humidity1              : simH + sinf(0.1f*float(m)) * 0.02f,
-            humidity2              : simH + sinf(0.3f*float(m)) * 0.03f,
-            humidity3              : simH + sinf(0.5f*float(m)) * 0.025f,
-            humidity4              : simH + sinf(0.7f*float(m)) * 0.035f,
-            RHtemp1                : 298.15f + sinf(0.0003f*m) * 2.0f,
-            RHtemp2                : 298.15f + sinf(0.0004f*m) * 2.0f,
-            RHtemp3                : 298.15f + sinf(0.0005f*m) * 2.0f,
-            RHtemp4                : 298.15f + sinf(0.0006f*m) * 2.0f
-        };
-    #endif
     logger.WriteBlock(&pkt_RH, sizeof(pkt_RH));   //Send package to SD card
 }
 #endif
