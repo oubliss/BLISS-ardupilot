@@ -12,11 +12,12 @@
 #   --headless       server only, no GUI (gz sim -s)
 #   --instance N     talk to SITL instance N (coptersonde_sitl.sh -I N); default 0
 #   --speed N        run N times faster than real time, if the computer keeps up (gz sim -z)
-#   ARDUPILOT_GAZEBO the ardupilot_gazebo checkout with the built plugins (default ~/Github/ardupilot_gazebo)
+#   ARDUPILOT_GAZEBO the ardupilot_gazebo checkout with the built plugins (default: next to this
+#                    ArduPilot checkout)
 
 TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SIM="$(dirname "$TOOLS")"
-APG="${ARDUPILOT_GAZEBO:-$HOME/Github/ardupilot_gazebo}"
+APG="${ARDUPILOT_GAZEBO:-$(dirname "$(dirname "$SIM")")/ardupilot_gazebo}"
 
 extra=()
 server=()

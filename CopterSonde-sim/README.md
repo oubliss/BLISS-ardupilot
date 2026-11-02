@@ -20,21 +20,22 @@ The IMET, RHUM and WIND logs, CASS_SENSOR_RAW and LAAIRS all work as on the real
 Build once:
 
 ```bash
-cd ~/Github/ardupilot_gazebo && git checkout main-CopterSonde && mkdir -p build && cd build && GZ_VERSION=jetty cmake .. && make -j8
+# from the ArduPilot checkout, with ardupilot_gazebo cloned next to it (or ARDUPILOT_GAZEBO set)
+(cd "${ARDUPILOT_GAZEBO:-../ardupilot_gazebo}" && git checkout main-CopterSonde && mkdir -p build && cd build && GZ_VERSION=jetty cmake .. && make -j8)
 ```
 
 ```bash
-cd ~/Github/my-ardupilot-CS && ./waf configure --board sitl && ./waf copter
+./waf configure --board sitl && ./waf copter
 ```
 
-Then start the two sides:
+Then start the two sides, also from the ArduPilot checkout:
 
 ```bash
 # Terminal A: Gazebo (generates the Norman world the first time)
-~/Github/my-ardupilot-CS/CopterSonde-sim/tools/coptersonde_gazebo.sh
+CopterSonde-sim/tools/coptersonde_gazebo.sh
 
 # Terminal B: SITL
-~/Github/my-ardupilot-CS/CopterSonde-sim/tools/coptersonde_sitl.sh
+CopterSonde-sim/tools/coptersonde_sitl.sh
 ```
 
 Connect LAAIRS with **WSL SITL** (TCP 127.0.0.1:5760); SITL waits for that connection before it starts. TCP 5762 is free for MAVProxy (`mavproxy.py --master tcp:127.0.0.1:5762 --console`) or the flight-test script.
@@ -42,7 +43,7 @@ Connect LAAIRS with **WSL SITL** (TCP 127.0.0.1:5760); SITL waits for that conne
 Fly a profile as in the field: on the ground flip RC7 (AutoVP, `RC7_OPTION 47`), arm in Loiter and switch to Auto. The script does the same:
 
 ```bash
-python3 ~/Github/my-ardupilot-CS/CopterSonde-sim/tools/vp_flight_test.py --alt 2438
+python3 CopterSonde-sim/tools/vp_flight_test.py --alt 2438
 ```
 
 As on the real CS3D, the VP battery monitor (`USR_VPBATT_WH 190`, 25 % reserve) ends the climb with an RTL at about 2.7 km. To profile up to 10 000 ft, let it only warn: `--alt 3048 --param USR_VPBATT_EN=0`.

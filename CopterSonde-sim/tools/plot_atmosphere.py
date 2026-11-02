@@ -12,7 +12,7 @@ Writes two figures next to the table:
 CSWX high-altitude flights. Their ascents are cached in ~/.cache/coptersonde, so the logs are
 read once.
 
-  python3 plot_atmosphere.py --cswx "/mnt/c/Users/sega0000/Desktop/CSWX high altitude"
+  python3 plot_atmosphere.py --cswx "<folder of CopterSonde logs>"
 """
 
 import argparse
