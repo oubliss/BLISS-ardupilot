@@ -2,20 +2,23 @@
 # AP_FLAKE8_CLEAN
 """
 End-to-end test of the CopterSonde charging on the Skycharge pad: SITL + Gazebo (the CopterSonde on the
-BOLOGNINI S1), the Skycharge digital twin, and LAAIRS's own Skycharge manager driving the pad as in the field.
+BOLOGNINI S1), the Skycharge digital twin, the RTK base twin, and LAAIRS's own Skycharge and RTK base managers
+driving them as in the field.
 
-Start first, Gazebo and the twin in the same GZ_PARTITION:
-  CS_BATTERY_AH=1 CS_BATTERY_SOC=0.9 coptersonde_gazebo.sh --headless --instance N
-  coptersonde_sitl.sh -I N
-  skycharge_twin.sh --gazebo
+Start the simulator first, e.g. on instance 7 with a small pack so the final charge is short:
+  coptersonde_sim.sh -I 7 --headless --battery-ah 1 --battery-soc 0.9
 Then run this with LAAIRS's Python (it imports laairs.core from --laairs), e.g. on Windows:
-  python skycharge_e2e.py --laairs C:/Users/me/Github/BLISS-GCS/src --master tcp:127.0.0.1:5762 --capacity 1000
+  python skycharge_e2e.py --laairs C:/Users/me/Github/BLISS-GCS/src --master tcp:127.0.0.1:5830
+      --pad 127.0.0.1:2292 --rtk-base socket://127.0.0.1:3171
 
 The phases, each checked:
+  0. RTK: without corrections the drone has a standalone 3D fix; LAAIRS surveys the base in and injects its RTCM,
+     and the drone turns RTK FIXED.
   1. Start-up on the pad, disarmed: LAAIRS enables scanning, the pad detects the drone and charges; the FC sees the
-     pack voltage rise and LAAIRS blocks arming.
+     pack voltage rise and LAAIRS blocks arming. With RTK streaming, LAAIRS now requires RTK FIXED to fly.
   2. The operator skips charging: the pad ends with CHARGING_FORCIBLY_STOPPED, which LAAIRS must not call full.
-  3. Take-off (GUIDED): LAAIRS stops the pad as the drone arms; hover; RTL lands back on the pad.
+  3. Take-off (GUIDED) in RTK FIXED: LAAIRS stops the pad as the drone arms; hover; RTL lands back on the pad,
+     RTK FIXED all the way.
   4. Landing: the pad stays parked until the post-flight checklist is acknowledged, then charges until the current
      falls below the cutoff (REACHED_CURRENT_CUTOFF), which LAAIRS calls full.
 """
@@ -48,6 +51,7 @@ class Vehicle:
         self.rc = [1500, 1500, 1000, 1500, 0, 0, 1100, 0]
         self.last_rc = 0
         self.on_update = None
+        self.flight_fixes = []   # GPS fix types while armed
 
     def pump(self, seconds):
         end = time.time() + seconds
@@ -71,6 +75,8 @@ class Vehicle:
                 continue
             else:
                 self.state[ty] = msg
+            if ty == 'GPS_RAW_INT' and self.armed():
+                self.flight_fixes.append(msg.fix_type)
             if self.on_update and ty in ('HEARTBEAT', 'SYS_STATUS', 'BATTERY_STATUS'):
                 self.on_update(self)
 
@@ -95,6 +101,10 @@ class Vehicle:
         consumed = b.current_consumed if b is not None and b.current_consumed >= 0 else None
         return level, s.voltage_battery * 1e-3, s.current_battery * 1e-2, consumed
 
+    def fix(self):
+        g = self.state.get('GPS_RAW_INT')
+        return g.fix_type if g else None
+
     def set_param(self, name, value):
         self.m.mav.param_set_send(self.m.target_system, self.m.target_component, name.encode(), value,
                                   mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
@@ -107,7 +117,10 @@ class Laairs:
     def __init__(self, src, host, port, capacity_mah, config_file):
         sys.path.insert(0, src)
         from laairs.core.event_bus import EventBus, EventType
+        from laairs.core.rtk_base_manager import RTKBaseManager, RTKState
         from laairs.core.skycharge_manager import SkychargeBatteryConfig, SkychargeManager
+        self.RTKBaseManager, self.RTKState = RTKBaseManager, RTKState
+        self.rtk = None
         self.events = EventType
         self.bus = EventBus()
         self.mgr = SkychargeManager(self.bus, config_file=config_file)
@@ -123,6 +136,13 @@ class Laairs:
         self.bus.emit(self.events.DATA_UPDATED, {'is_armed': vehicle.armed()})
         level, voltage, _current, consumed = vehicle.battery()
         self.mgr.update_drone_battery(level, voltage, consumed)
+
+    def rtk_streaming(self):
+        return self.rtk is not None and self.rtk.get_status().state == self.RTKState.STREAMING
+
+    def precision_landing_required(self):
+        """LAAIRS's ConnectionWindow._precision_landing_required: Skycharge on and the RTK base streaming."""
+        return self.mgr.enabled and self.rtk_streaming()
 
     def print_log(self):
         for seq, ts, level, text in self.mgr.get_log_entries(self._log_seq):
@@ -165,6 +185,22 @@ def run(args):
     v.pump(3)
     mgr = laairs.mgr
     st = mgr.get_status
+    fix_names = {3: '3D', 4: 'DGPS', 5: 'RTK FLOAT', 6: 'RTK FIXED'}
+
+    if args.rtk_base:
+        print('\n0. RTK base: survey-in and corrections', flush=True)
+        wait_for(v, laairs, 'standalone GPS fix', lambda: (v.fix() or 0) >= 3, 120)
+        check(v.fix() < 5, f'no RTK without corrections ({fix_names.get(v.fix(), v.fix())})')
+        laairs.rtk = laairs.RTKBaseManager(mavlink_connection=v.m, measurement_rate_hz=1)
+        check(laairs.rtk.connect(args.rtk_base), f'LAAIRS connects to the RTK base at {args.rtk_base}')
+        wait_for(v, laairs, 'base configured', lambda: laairs.rtk.state == laairs.RTKState.CONFIGURING
+                 and laairs.rtk.get_message_stats()['msg_counts'].get('NAV-PVT'), 60)
+        check(laairs.rtk.start_survey(min_time=60, accuracy_limit=2.0), 'survey-in started (60 s, 2.0 m)')
+        wait_for(v, laairs, 'survey-in complete, RTCM streaming', laairs.rtk_streaming, 180, every=15)
+        wait_for(v, laairs, 'drone RTK FIXED', lambda: v.fix() == 6, 60)
+        r = laairs.rtk.get_status()
+        print(f'    base: survey {r.survey_status.observation_time} s to {r.survey_status.mean_accuracy:.2f} m, '
+              f'{r.rtcm_messages_sent} RTCM messages injected', flush=True)
 
     print('\n1. on the pad at start-up, disarmed', flush=True)
     mgr.set_enabled(True)            # the site-arrival checklist's "Use Skycharge charging pad"
@@ -175,6 +211,8 @@ def run(args):
     wait_for(v, laairs, 'arming lock engaged', lambda: st().arming_locked, 30)
     v.pump(15)
     check(v.battery()[1] > v0 + 0.05, f'FC pack voltage rises while charging ({v0:.2f} -> {v.battery()[1]:.2f} V)')
+    if args.rtk_base:
+        check(laairs.precision_landing_required(), 'LAAIRS precision landing mode: RTK FIXED required to fly')
 
     print('\n2. operator skips the charge', flush=True)
     mgr.override_and_skip()
@@ -187,6 +225,9 @@ def run(args):
     print('\n3. take-off, hover, RTL back onto the pad', flush=True)
     wait_for(v, laairs, 'position for GUIDED', lambda: v.state.get('GPS_RAW_INT') is not None
              and v.state['GPS_RAW_INT'].fix_type >= 3, 120)
+    if args.rtk_base:
+        # LAAIRS's Arm & Takeoff gate: with precision landing required it asks before arming without RTK FIXED
+        check(v.fix() == 6, f'RTK FIXED at take-off ({fix_names.get(v.fix(), v.fix())})')
     v.m.set_mode('GUIDED')
     v.pump(2)
     for _ in range(30):
@@ -202,6 +243,13 @@ def run(args):
     v.pump(args.hover)
     v.m.set_mode('RTL')
     wait_for(v, laairs, 'RTL lands and disarms', lambda: not v.armed(), 300)
+    if args.rtk_base:
+        fixes = v.flight_fixes
+        check(fixes and all(f == 6 for f in fixes),
+              f'RTK FIXED for all {len(fixes)} GPS reports in flight'
+              f'{"" if fixes and all(f == 6 for f in fixes) else " (got " + str(sorted(set(fixes))) + ")"}')
+        check(laairs.rtk_streaming(), f'corrections still streaming ({laairs.rtk.get_status().rtcm_messages_sent} '
+              'RTCM messages injected)')
 
     print('\n4. landed: charge after the post-flight checklist', flush=True)
     v.pump(8)
@@ -217,8 +265,10 @@ def run(args):
     check(s.cycle_state == 'complete_reported', f'LAAIRS charge cycle completes ({s.cycle_state})')
     check(not s.arming_locked, 'arming allowed again')
     mgr.set_enabled(False)
-    print('\nPASS: SITL + Gazebo + Skycharge twin + LAAIRS charged the CopterSonde through a flight cycle',
-          flush=True)
+    if laairs.rtk is not None:
+        laairs.rtk.stop()
+    print('\nPASS: SITL + Gazebo + Skycharge twin' + (' + RTK base twin' if args.rtk_base else '') +
+          ' + LAAIRS charged the CopterSonde through a flight cycle', flush=True)
 
 
 def main():
@@ -226,6 +276,8 @@ def main():
     ap.add_argument('--laairs', required=True, help="BLISS-GCS src folder (LAAIRS's laairs package)")
     ap.add_argument('--master', default='tcp:127.0.0.1:5762', help='SITL MAVLink (default: instance 0 SERIAL1)')
     ap.add_argument('--pad', default='127.0.0.1:2222', help='the twin (or a pad) as host:port')
+    ap.add_argument('--rtk-base', default='socket://127.0.0.1:3101',
+                    help="the RTK base's serial port or URL (default: the twin, %(default)s); '' flies without RTK")
     ap.add_argument('--capacity', type=int, default=1000, help='pack mAh; match CS_BATTERY_AH (default 1000)')
     ap.add_argument('--alt', type=float, default=20.0, help='take-off altitude, m')
     ap.add_argument('--hover', type=float, default=40.0, help='hover time, s')

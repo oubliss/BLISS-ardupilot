@@ -18,7 +18,30 @@ The IMET, RHUM and WIND logs, CASS_SENSOR_RAW and LAAIRS all work as on the real
 
 ## Run
 
-Build once:
+One command starts Gazebo, SITL, the Skycharge twin and the RTK base twin, and Ctrl-C stops them all. From the ArduPilot checkout:
+
+```bash
+CopterSonde-sim/tools/coptersonde_sim.sh
+```
+
+It works on any computer with Gazebo and ArduPilot's SITL tools. Clone ardupilot_gazebo in the same folder as this ArduPilot checkout, under any name, or set `ARDUPILOT_GAZEBO`. The script finds everything from where it is.
+
+First the script puts ardupilot_gazebo on `main-CopterSonde`. RFSonde shares that checkout, so the script asks before switching it. It rebuilds the plugins when their sources changed, but never while a Gazebo is running. SITL builds this checkout's firmware as usual. The terminal shows SITL, the twins' state changes and Gazebo's errors. The full logs are in `~/.cache/coptersonde/run/I0/`.
+
+| Option | Effect |
+|---|---|
+| `-I N` | instance N: MAVLink TCP 5760+10N, its own Gazebo partition and SITL folder |
+| `--mavproxy` | MAVProxy in this terminal instead of LAAIRS (`--mavproxy-args "--console --map"`) |
+| `--headless` | no Gazebo window |
+| `--no-skycharge` | without the Skycharge twin |
+| `--no-rtk-base` | without the RTK base twin: the drone then flies on a standalone 3D fix |
+| `--no-build` | the plugins and the firmware as built |
+| `--battery-soc S`, `--battery-ah A` | the pack at start ([Skycharge charging pad](#skycharge-charging-pad)) |
+| `--start-hour`, `--cycle-hours`, `--truth-log`, `--speed` | as for `coptersonde_gazebo.sh` below |
+
+Without `--mavproxy`, connect LAAIRS with **WSL SITL** (TCP 127.0.0.1:5760). SITL waits for that connection before it starts. TCP 5762 is then free for MAVProxy (`mavproxy.py --master tcp:127.0.0.1:5762 --console`) or the flight-test script.
+
+By hand, build once:
 
 ```bash
 # from the ArduPilot checkout, with ardupilot_gazebo cloned next to it (or ARDUPILOT_GAZEBO set)
@@ -38,8 +61,6 @@ CopterSonde-sim/tools/coptersonde_gazebo.sh
 # Terminal B: SITL
 CopterSonde-sim/tools/coptersonde_sitl.sh
 ```
-
-Connect LAAIRS with **WSL SITL** (TCP 127.0.0.1:5760); SITL waits for that connection before it starts. TCP 5762 is free for MAVProxy (`mavproxy.py --master tcp:127.0.0.1:5762 --console`) or the flight-test script.
 
 Fly a profile as in the field: on the ground flip RC7 (AutoVP, `RC7_OPTION 47`), arm in Loiter and switch to Auto. The script does the same:
 
@@ -182,9 +203,10 @@ The charge current goes into the cells but not through the power module. So SITL
 
 ### Run
 
+`coptersonde_sim.sh` starts the twin with the rest. By hand, start Gazebo and SITL, then the twin in a third terminal:
+
 ```bash
-# Gazebo and SITL as usual, then the twin in a third terminal:
-~/Github/my-ardupilot-CS/CopterSonde-sim/tools/skycharge_twin.sh --gazebo
+CopterSonde-sim/tools/skycharge_twin.sh --gazebo    # from the ArduPilot checkout
 ```
 
 In LAAIRS, choose **Digital twin (simulator)** in the Skycharge console (View → Toggle Skycharge Console). The console connects to `127.0.0.1:2222`, which WSL forwards from Windows. Alternatively, tick "Use Skycharge charging pad" in the site-arrival checklist. Then:
@@ -224,11 +246,12 @@ These cover:
 - the JSON API;
 - the power cycle.
 
-`tools/skycharge_e2e.py` runs the whole chain: SITL + Gazebo + the twin + LAAIRS's own Skycharge manager, which it imports from a BLISS-GCS checkout and runs with LAAIRS's Python. Its four phases:
+`tools/skycharge_e2e.py` runs the whole chain: SITL + Gazebo + the twins + LAAIRS's own Skycharge and RTK base managers, which it imports from a BLISS-GCS checkout and runs with LAAIRS's Python. Its phases:
 
+0. RTK: LAAIRS surveys the base in and injects its corrections, and the drone goes from a standalone fix to RTK FIXED.
 1. On the pad at start-up: the pad charges and LAAIRS blocks arming.
 2. The operator skips the charge: the pad ends with `CHARGING_FORCIBLY_STOPPED`, and LAAIRS must not call that full.
-3. Take-off, hover and RTL back onto the pad.
+3. Take-off, hover and RTL back onto the pad, in RTK FIXED from arming to landing.
 4. After the post-flight checklist, a charge to the current cutoff.
 
 ## RTK base station
@@ -242,7 +265,7 @@ In the field, LAAIRS's RTK Injection window drives a u-blox F9P base on a COM po
 
 Survey-in follows the F9P: the mean position's accuracy is 2.5 m × √(30 s / (t + 30 s)), so LAAIRS's minimum of 60 s at 2.0 m completes at 60 s (1.44 m).
 
-In LAAIRS, open the RTK Injection window, choose **socket://127.0.0.1:3101 - Digital twin (simulator)** as the port, connect, and start Survey-In. RTCM streams once the survey completes, about 60 s later, and the drone reports RTK FIXED about 10 s after that.
+In LAAIRS, open the RTK Injection window, choose **socket://127.0.0.1:3101 - Digital twin (simulator)** as the port, connect, and start Survey-In. The launcher prints the port. RTCM streams once the survey completes, about 60 s later, and the drone reports RTK FIXED about 10 s after that.
 
 ```bash
 python3 -m pytest CopterSonde-sim/tests/test_rtk_base_twin.py   # needs pyubx2, pyrtcm and pyserial, as LAAIRS
